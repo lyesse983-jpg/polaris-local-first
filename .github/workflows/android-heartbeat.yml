@@ -18,6 +18,8 @@ jobs:
   apk:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    env:
+      POLARIS_HEARTBEAT_DEBUG_KEYSTORE: ${{ github.workspace }}/.heartbeat-signing/debug.keystore
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -42,6 +44,7 @@ jobs:
           src/app/chat/silentTriggerChatPort.test.ts
           src/ui/shell/menu/automationHeartbeatForm.test.ts
           src/engines/tool-protocol/heartbeatScheduleParser.test.ts
+          src/ui/worlds/chat/message/MessageParagraphBubbles.test.tsx
       - name: Typecheck and build web assets
         run: npm run build
       - name: Sync Android plugins and assets
@@ -53,8 +56,15 @@ jobs:
       - name: Preserve test signing key between builds
         uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: polaris-heartbeat-debug-signing-v1
+          path: .heartbeat-signing/debug.keystore
+          key: polaris-heartbeat-debug-signing-v2
+      - name: Prepare dedicated test signing key
+        run: |
+          mkdir -p "$(dirname "$POLARIS_HEARTBEAT_DEBUG_KEYSTORE")"
+          if [ ! -f "$POLARIS_HEARTBEAT_DEBUG_KEYSTORE" ]; then
+            keytool -genkeypair -noprompt -keystore "$POLARIS_HEARTBEAT_DEBUG_KEYSTORE" -storepass android -keypass android -alias androiddebugkey -dname "CN=Polaris Heartbeat Test,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
+          fi
+          test -s "$POLARIS_HEARTBEAT_DEBUG_KEYSTORE"
       - name: Verify persistence and import contracts
         run: npm run test:data-boundary && npx vitest run src/stores/storeImportPackage.test.ts src/stores/storeImportResult.test.ts src/stores/storeImportDiagnostics.test.ts
       - name: Build separately installable test APK

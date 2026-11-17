@@ -312,10 +312,11 @@ function MessageRowComponent({
     openUserActionMenu();
   };
 
+  const splitAssistantBubbles = isAssistantReply && !state.editing && !showStreamingPrelude;
   const messageBubble = (
     <div
       ref={bubbleFrameRef}
-      className={`bubble-frame ${message.role === 'assistant' ? 'assistant' : 'user'} ${state.editing ? 'editing' : ''} ${state.lifecycle} ${showStreamingPrelude ? 'streaming-prelude' : ''} ${userActionMenuOpen ? 'action-menu-open' : ''}`}
+      className={`${splitAssistantBubbles ? 'assistant-content-frame' : 'bubble-frame'} ${message.role === 'assistant' ? 'assistant' : 'user'} ${state.editing ? 'editing' : ''} ${state.lifecycle} ${showStreamingPrelude ? 'streaming-prelude' : ''} ${userActionMenuOpen ? 'action-menu-open' : ''}`}
       onContextMenu={handleBubbleContextMenu}
       onPointerDown={handleBubblePointerDown}
       onPointerUp={clearLongPressTimer}
@@ -324,7 +325,7 @@ function MessageRowComponent({
       onPointerMove={clearLongPressTimer}
     >
       <div
-        className={`bubble ${message.role === 'assistant' ? 'assistant' : 'user'} ${state.editing ? 'editing' : ''}`}
+        className={`${splitAssistantBubbles ? 'assistant-content' : 'bubble'} ${message.role === 'assistant' ? 'assistant' : 'user'} ${state.editing ? 'editing' : ''}`}
       >
         {state.editing ? (
           <MessageEditInline
@@ -372,6 +373,7 @@ function MessageRowComponent({
                   showThinking={showThinking}
                   preferInlineCode={showStreamingLive}
                   smoothStreamingText={showStreamingLive}
+                  splitAssistantBubbles={splitAssistantBubbles}
                   onToggleCodeExpanded={() => actions.toggleCodeExpanded(message.id)}
                   onApplyCustomCss={actions.applyCustomCss}
                 />

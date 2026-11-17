@@ -455,15 +455,22 @@ export function AutomationRulesPanel({
                 : (language === 'en-US' ? 'The reply appears in the selected conversation.' : '回复会出现在选定的会话中。')}</span>
             </label>
 
-            <label className="automation-field ps-field">
-              <span className="ps-field-label">
-                <input type="checkbox" checked={autonomous} onChange={(event) => setAutonomous(event.target.checked)} />
-                {' '}{language === 'en-US' ? 'Let the collaborator arrange the next wake-up' : '允许协作者自行安排下一次唤醒'}
-              </span>
+            <div className="automation-field ps-field">
+              <div className="automation-autonomy-row">
+                <span className="ps-field-label">{language === 'en-US' ? 'Let the collaborator arrange the next wake-up' : '允许协作者自行安排下一次唤醒'}</span>
+                <button
+                  type="button"
+                  role="switch"
+                  className={`ps-toggle-sw automation-autonomy-switch ${autonomous ? 'ps-toggle-sw--on' : ''}`}
+                  aria-checked={autonomous}
+                  aria-label={language === 'en-US' ? 'Let the collaborator arrange the next wake-up' : '允许协作者自行安排下一次唤醒'}
+                  onClick={() => setAutonomous((current) => !current)}
+                ><span className="ps-toggle-knob" /></button>
+              </div>
               <span className="ps-field-hint">{language === 'en-US'
                 ? 'During this wake-up, the collaborator may choose when to continue, work quietly, or leave no next appointment. This also enables the “Proactive messages” tools; other tool permissions stay as configured.'
                 : '这次醒来时，协作者可以决定何时继续、安静做事，或暂不预约下一次。保存时会同时开启「主动消息」工具，其他工具仍沿用原设置。'}</span>
-            </label>
+            </div>
 
             <label className="automation-field ps-field">
               <span className="ps-field-label automation-field-label-row">

@@ -63,3 +63,4 @@ public/tutorial.html
 
 # Local APK build outputs
 artifacts/
+.heartbeat-signing/
