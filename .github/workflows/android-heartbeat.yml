@@ -66,7 +66,7 @@ jobs:
           fi
           test -s "$POLARIS_HEARTBEAT_DEBUG_KEYSTORE"
       - name: Verify persistence and import contracts
-        run: npm run test:data-boundary && npx vitest run src/stores/storeImportPackage.test.ts src/stores/storeImportResult.test.ts src/stores/storeImportDiagnostics.test.ts
+        run: npm run test:data-boundary && npx vitest run src/stores/storeImportPackage.test.ts src/stores/storeImportResult.test.ts src/stores/storeImportDiagnostics.test.ts src/stores/storeExportPackage.test.ts src/native/systemBackupFiles.test.ts
       - name: Build separately installable test APK
         run: bash scripts/build-heartbeat-android.sh --prepared
       - name: Enable emulator acceleration

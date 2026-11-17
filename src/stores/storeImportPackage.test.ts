@@ -1189,6 +1189,77 @@ describe('importStructuredExportPackage', () => {
     ]);
   });
 
+  it('diagnoses a short workspace body and preserves the complete document row and pointer', async () => {
+    pageLifecycleMocks.flushPageLifecycleHandlers.mockResolvedValue(undefined);
+    vi.stubGlobal('window', { localStorage: createLocalStorageMock() });
+    const collection = {
+      workspaceReferenceDocs: [{ id: 'private-doc', projectId: 'project-doc', title: 'Private title',
+        summary: '', content: 'complete document body', charCount: 22, contentLoaded: true,
+        source: 'manual', createdAt: 1, updatedAt: 1 }],
+      roomProjects: [{ id: 'project-doc', title: 'Project', slug: 'project', fileIds: [], tags: [],
+        source: 'manual', createdAt: 1, updatedAt: 1 }]
+    };
+    expect((await importStructuredExportPackage(await buildMinimalImportBlob({ collectionState: collection }))).status).toBe('complete');
+    const key = 'local-data-v1:row:document:workspace-reference-doc:private-doc';
+    const bodyBefore = currentKvValue(key);
+    const pointerBefore = currentKvValue('local-data-v1:pointer:document');
+    const result = await importStructuredExportPackage(await buildMinimalImportBlob({ collectionState: {
+      ...collection, workspaceReferenceDocs: [{ ...collection.workspaceReferenceDocs[0], content: 'short' }]
+    } }));
+    expect(result.status).toBe('partial');
+    expect(result.retainedDomains).toContainEqual({ domain: 'document', stage: 'domain-commit',
+      reason: 'DOCUMENT_BODY_INCOMPLETE missing=0 short=1 memory=0 workspace=1 orphan=0' });
+    expect(currentKvValue(key)).toEqual(bodyBefore);
+    expect(currentKvValue('local-data-v1:pointer:document')).toEqual(pointerBefore);
+  });
+
+  it('round-trips persisted unloaded persona and workspace documents through a new backup', async () => {
+    pageLifecycleMocks.flushPageLifecycleHandlers.mockResolvedValue(undefined);
+    vi.stubGlobal('window', { localStorage: createLocalStorageMock() });
+    const personaBody = '瑞的记忆正文😀\n'.repeat(12000);
+    const workspaceBody = '工作区文档🥺\n'.repeat(12000);
+    const persona = createPersonaTemplate({
+      id: 'persona-roundtrip', name: 'Roundtrip', description: '',
+      memory: { referenceDocs: [{
+        id: 'memory-roundtrip', title: 'Memory', summary: '', content: personaBody,
+        charCount: personaBody.length, contentLoaded: true, source: 'upload', updatedAt: 1
+      }] }
+    });
+    const original = await buildStructuredExportPackage({
+      spaceState: {}, chatState: { conversations: [], activeConversationId: null },
+      collectionState: {
+        cards: [], projectFiles: [], roomProjects: [{ id: 'project-roundtrip', title: 'Project', slug: 'roundtrip', fileIds: [], tags: [], source: 'manual', createdAt: 1, updatedAt: 1 }], imageCards: [], deletedBundledCardIds: [],
+        workspaceReferenceDocs: [{
+          id: 'workspace-roundtrip', projectId: 'project-roundtrip', ownerCollaboratorId: persona.id,
+          title: 'Workspace', summary: '', content: workspaceBody, charCount: workspaceBody.length,
+          contentLoaded: true, source: 'manual', createdAt: 1, updatedAt: 1
+        }]
+      },
+      personaState: { personas: [persona], activeCollaboratorId: persona.id, seededDefaultPersonaIds: [] },
+      runtimeState: normalizeRuntimePayload(null), assetEntries: []
+    });
+    const first = await importStructuredExportPackage(original.blob);
+    expect(first).toMatchObject({ status: 'complete' });
+    // No document has been opened: read catalogs/bodies from the persisted active source.
+    const fresh = await buildStructuredExportPackage({ assetEntries: [] });
+    const zip = await JSZip.loadAsync(await fresh.blob.arrayBuffer());
+    const bodies = JSON.parse(await zip.file(PERSONA_MEMORY_DOC_CONTENT_PATH)!.async('string'));
+    const collection = JSON.parse(await zip.file('stores/collection.json')!.async('string'));
+    expect(bodies.docs['persona-roundtrip:memory-roundtrip']).toBe(personaBody);
+    expect(collection.workspaceReferenceDocs[0].content).toBe(workspaceBody);
+    for (const clean of [true, false]) {
+      if (clean) { kvValues = new Map(); resetStoreLocalDataBackendForTesting(); }
+      const restored = await importStructuredExportPackage(fresh.blob);
+      expect(restored).toMatchObject({ status: 'complete' });
+      const again = await buildStructuredExportPackage({ assetEntries: [] });
+      const againZip = await JSZip.loadAsync(await again.blob.arrayBuffer());
+      expect(JSON.parse(await againZip.file(PERSONA_MEMORY_DOC_CONTENT_PATH)!.async('string')).docs)
+        .toEqual(bodies.docs);
+      expect(JSON.parse(await againZip.file('stores/collection.json')!.async('string')).workspaceReferenceDocs[0].content)
+        .toBe(workspaceBody);
+    }
+  });
+
   it('stress round-trips a production-diagnostics-shaped backup into a clean LocalData restore', async () => {
     pageLifecycleMocks.flushPageLifecycleHandlers.mockResolvedValue(undefined);
     assetStoreMocks.exportAssetEntries.mockResolvedValue([]);

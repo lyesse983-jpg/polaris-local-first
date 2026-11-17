@@ -250,6 +250,19 @@ describe('systemBackupFiles availability', () => {
     expect(saved).toBe(true);
   });
 
+  it('preserves supplementary characters across independently UTF-8 encoded native chunks', async () => {
+    capacitorState.isNativePlatform = true;
+    capacitorState.platform = 'android';
+    const limit = 128 * 1024;
+    const text = 'a'.repeat(limit - 1) + '😀' + 'b'.repeat(limit - 2) + '🥺tail';
+    await addZipTextEntryViaSystemFiles('zip-unicode', 'stores/collection.json', text);
+    const chunks = mocks.systemFile.appendZipTextChunk.mock.calls.map(([call]) => call.text as string);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.length <= limit)).toBe(true);
+    // Mirrors native UTF-8 encoding per call, not a join before encoding.
+    expect(chunks.map((chunk) => new TextDecoder().decode(new TextEncoder().encode(chunk))).join('')).toBe(text);
+  });
+
   it('splits Android ZIP text entries instead of sending one bridge-sized string', async () => {
     capacitorState.isNativePlatform = true;
     capacitorState.platform = 'android';

@@ -21,6 +21,16 @@ describe('safe import failure diagnostics', () => {
     expect(text).not.toContain('private-fixture-key');
     expect(text).not.toContain('do-not-display');
   });
+  it('reports fixed document body counts without leaking appended private details', () => {
+    const text = formatStoreImportResult({ status: 'partial', importedDomains: [], retainedDomains: [{
+      domain: 'document', stage: 'domain-commit',
+      reason: 'DOCUMENT_BODY_INCOMPLETE missing=1 short=2 memory=2 workspace=1 orphan=0 private-title api-secret'
+    }] });
+    expect(text).toContain('IMPORT_DOCUMENT_BODY（缺正文1，长度不足2；记忆2，工作区1，孤立正文0）');
+    expect(text).not.toContain('private-title');
+    expect(text).not.toContain('api-secret');
+  });
+
   it('keeps native contract rejection distinct from data validation failures', () => {
     const text = formatStoreImportResult({
       status: 'partial', importedDomains: [],

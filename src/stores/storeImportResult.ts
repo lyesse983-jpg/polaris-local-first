@@ -24,6 +24,12 @@ const DOMAIN_LABELS: Record<StoreImportDomainFailure['domain'], string> = {
 };
 
 function importFailureCode(reason: string) {
+  const body = /DOCUMENT_BODY_INCOMPLETE missing=(\d+) short=(\d+) memory=(\d+) workspace=(\d+) orphan=(\d+)/.exec(reason);
+  if (body) return `IMPORT_DOCUMENT_BODY（缺正文${body[1]}，长度不足${body[2]}；记忆${body[3]}，工作区${body[4]}，孤立正文${body[5]}）`;
+  if (/hydration preview is not validation-ready/i.test(reason)) return 'IMPORT_VALIDATION_PREVIEW';
+  if (/validation (shrank|lost)/i.test(reason)) return 'IMPORT_VALIDATION_COVERAGE';
+  if (/validation contains duplicate object ids/i.test(reason)) return 'IMPORT_VALIDATION_DUPLICATE';
+  if (/validation contains non-complete active rows/i.test(reason)) return 'IMPORT_VALIDATION_INCOMPLETE';
   if (/complete row is older than existing complete row/i.test(reason)) return 'IMPORT_RECORD_REVISION';
   if (/same row key more than once/i.test(reason)) return 'IMPORT_DUPLICATE_RECORD';
   if (/CursorWindow|SQLiteBlobTooBigException|Row too big/i.test(reason)) return 'IMPORT_SQLITE_READ_LIMIT';
