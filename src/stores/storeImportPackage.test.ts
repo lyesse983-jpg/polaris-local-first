@@ -614,6 +614,46 @@ describe('importStructuredExportPackage', () => {
     expect(installed.commits.map((commit) => commit.domain)).toContain('chat');
   });
 
+  it('recovers every domain after a large chat read stops failing at the native row boundary', async () => {
+    pageLifecycleMocks.flushPageLifecycleHandlers.mockResolvedValue(undefined);
+    vi.stubGlobal('window', { localStorage: createLocalStorageMock() });
+    const installed = createMemoryStoreLocalDataBackend();
+    const read = installed.backend.read.bind(installed.backend);
+    let cursorLimited = true;
+    installed.backend.read = async <T>(key: string) => {
+      const value = await read<T>(key);
+      if (cursorLimited && value !== null && new TextEncoder().encode(JSON.stringify(value)).length > 2 * 1024 * 1024) {
+        throw new Error('SQLiteBlobTooBigException: Row too big to fit into CursorWindow');
+      }
+      return value;
+    };
+    installStoreLocalDataBackend(installed.backend);
+    const content = 'synthetic-large-conversation-'.repeat(110_000);
+    const backup = await buildMinimalImportBlob({ chatState: {
+      conversations: [{
+        id: 'large-import-chat', title: 'Synthetic long conversation', collaboratorId: null,
+        messages: [{ id: 'large-message', role: 'user', content, timestamp: 1 }],
+        pinnedAt: null, updatedAt: 2
+      }],
+      activeConversationId: 'large-import-chat'
+    } });
+    const first = await importStructuredExportPackage(backup);
+    expect(first.status).toBe('partial');
+    expect(first.importedDomains).toEqual(['chat']);
+    expect(first.retainedDomains.filter((entry) => entry.stage === 'domain-commit')).toHaveLength(6);
+    expect((await importStructuredExportPackage(backup)).importedDomains).toEqual([]);
+    // Android instrumentation separately proves scalar reads remove this native boundary.
+    cursorLimited = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const restored = await importStructuredExportPackage(backup);
+      expect(restored.status).toBe('complete');
+      expect(restored.importedDomains).toHaveLength(7);
+      expect(restored.retainedDomains).toEqual([]);
+      const record = installed.values.get('local-data-v1:row:chat:conversationRecord:large-import-chat') as { value?: { messages?: Array<{ content: string }> } };
+      expect(record?.value?.messages?.[0]?.content === content).toBe(true);
+    }
+  });
+
   it('rejects structured import when a LocalData domain cannot be restored', async () => {
     pageLifecycleMocks.flushPageLifecycleHandlers.mockResolvedValue(undefined);
     vi.stubGlobal('window', { localStorage: createLocalStorageMock() });

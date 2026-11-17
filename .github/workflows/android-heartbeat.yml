@@ -56,7 +56,7 @@ jobs:
           path: ~/.android/debug.keystore
           key: polaris-heartbeat-debug-signing-v1
       - name: Verify persistence and import contracts
-        run: npm run test:data-boundary && npx vitest run src/stores/storeImportPackage.test.ts src/stores/storeImportResult.test.ts
+        run: npm run test:data-boundary && npx vitest run src/stores/storeImportPackage.test.ts src/stores/storeImportResult.test.ts src/stores/storeImportDiagnostics.test.ts
       - name: Build separately installable test APK
         run: bash scripts/build-heartbeat-android.sh --prepared
       - name: Enable emulator acceleration
@@ -73,7 +73,15 @@ jobs:
           profile: pixel_2
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: bash android/gradlew -p android connectedDebugAndroidTest --no-daemon --stacktrace
+          script: bash android/gradlew -p android :app:connectedDebugAndroidTest --no-daemon --stacktrace
+      - name: Upload Android regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-sqlite-regression-${{ github.sha }}
+          path: android/app/build/outputs/androidTest-results/connected/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload APK and checksum
         uses: actions/upload-artifact@v4
         with:
