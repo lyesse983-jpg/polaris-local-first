@@ -24,6 +24,8 @@ const DOMAIN_LABELS: Record<StoreImportDomainFailure['domain'], string> = {
 };
 
 function importFailureCode(reason: string) {
+  if (/complete row is older than existing complete row/i.test(reason)) return 'IMPORT_RECORD_REVISION';
+  if (/same row key more than once/i.test(reason)) return 'IMPORT_DUPLICATE_RECORD';
   if (/CursorWindow|SQLiteBlobTooBigException|Row too big/i.test(reason)) return 'IMPORT_SQLITE_READ_LIMIT';
   if (/只允许仓库适配层声明的 SQL|disallowedSql/i.test(reason)) return 'IMPORT_SQLITE_STATEMENT';
   if (/validation|verify-failed|验证失败|校验失败/i.test(reason)) return 'IMPORT_VALIDATION';

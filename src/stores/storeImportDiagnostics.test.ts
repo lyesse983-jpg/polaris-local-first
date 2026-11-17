@@ -2,6 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { formatStoreImportResult } from './storeImportResult';
 
 describe('safe import failure diagnostics', () => {
+  it('identifies collection revision conflicts without exposing record identifiers', () => {
+    const text = formatStoreImportResult({
+      status: 'partial', importedDomains: ['chat', 'persona', 'runtime', 'space', 'document', 'asset'],
+      retainedDomains: [{ domain: 'collection', stage: 'domain-commit',
+        reason: 'Local data complete row is older than existing complete row: private-record-id' }]
+    });
+    expect(text).toContain('房间=IMPORT_RECORD_REVISION');
+    expect(text).not.toContain('private-record-id');
+  });
   it('reports native row limits without displaying source data or credentials', () => {
     const text = formatStoreImportResult({
       status: 'partial', importedDomains: ['chat'],

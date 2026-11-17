@@ -270,6 +270,15 @@ export async function restoreStructuredImportToLocalDataRepository(
       version,
       updatedAt: committedAt
     });
+    // An explicit backup restore is a new write of the imported snapshot. Preserve
+    // original object timestamps inside the value, but date its row envelope at
+    // this restore, so a newer seeded/local revision does not reject an older backup.
+    // A concurrent write newer than committedAt is still protected by the repository.
+    collectionPlan.unitOfWork.mutations = collectionPlan.unitOfWork.mutations.map((mutation) => (
+      mutation.type === 'put' && mutation.row.state === 'complete'
+        ? { ...mutation, row: { ...mutation.row, updatedAt: committedAt } }
+        : mutation
+    ));
     return await commitAndPromoteProjectedDomain(await prepareReplacement(collectionPlan.unitOfWork));
   });
 

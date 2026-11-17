@@ -654,6 +654,45 @@ describe('importStructuredExportPackage', () => {
     }
   });
 
+  it('explicitly restores older collection contents over newer local versions without changing content timestamps', async () => {
+    pageLifecycleMocks.flushPageLifecycleHandlers.mockResolvedValue(undefined);
+    vi.stubGlobal('window', { localStorage: createLocalStorageMock() });
+    const installed = createMemoryStoreLocalDataBackend();
+    installStoreLocalDataBackend(installed.backend);
+    const card = {
+      id: 'shared-bundled-card', title: 'Local card', kind: 'card', language: 'html',
+      code: '<p>newer local content</p>', tags: [], createdAt: 1, updatedAt: 20
+    };
+    expect((await importStructuredExportPackage(await buildMinimalImportBlob({
+      collectionState: { cards: [card] }
+    }))).status).toBe('complete');
+    const backupCard = { ...card, title: 'Restored card', code: '<p>original backup content</p>', updatedAt: 10 };
+    const backup = await buildMinimalImportBlob({ collectionState: { cards: [backupCard] } });
+    const restored = await importStructuredExportPackage(backup);
+    expect(restored.status, JSON.stringify(restored.retainedDomains)).toBe('complete');
+    expect(restored.importedDomains).toHaveLength(7);
+    expect(restored.retainedDomains).toEqual([]);
+    const row = installed.values.get('local-data-v1:row:collection:card:shared-bundled-card') as {
+      updatedAt: number; value: { value: unknown; updatedAt: number }
+    };
+    expect(row.value.value).toEqual(backupCard);
+    expect(row.value.updatedAt).toBe(10);
+    expect(row.updatedAt).toBeGreaterThan(20);
+    expect((await importStructuredExportPackage(backup)).status).toBe('complete');
+    // A write made after this import starts must remain protected: restoring a
+    // backup is not permission to bypass the ordinary stale-write guard.
+    const concurrent = structuredClone(installed.values.get('local-data-v1:row:collection:card:shared-bundled-card')) as typeof row;
+    concurrent.updatedAt = Date.now() + 60_000;
+    concurrent.value.value = { ...backupCard, code: '<p>concurrent edit</p>' };
+    installed.values.set('local-data-v1:row:collection:card:shared-bundled-card', concurrent);
+    const conflict = await importStructuredExportPackage(backup);
+    expect(conflict.status).toBe('partial');
+    expect(conflict.retainedDomains).toContainEqual(expect.objectContaining({
+      domain: 'collection', reason: expect.stringContaining('older than existing complete row')
+    }));
+    expect(installed.values.get('local-data-v1:row:collection:card:shared-bundled-card')).toEqual(concurrent);
+  });
+
   it('rejects structured import when a LocalData domain cannot be restored', async () => {
     pageLifecycleMocks.flushPageLifecycleHandlers.mockResolvedValue(undefined);
     vi.stubGlobal('window', { localStorage: createLocalStorageMock() });
