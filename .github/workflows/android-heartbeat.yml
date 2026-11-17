@@ -50,8 +50,30 @@ jobs:
         run: >-
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+      - name: Preserve test signing key between builds
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: polaris-heartbeat-debug-signing-v1
+      - name: Verify persistence and import contracts
+        run: npm run test:data-boundary && npx vitest run src/stores/storeImportPackage.test.ts src/stores/storeImportResult.test.ts
       - name: Build separately installable test APK
         run: bash scripts/build-heartbeat-android.sh --prepared
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run Android SQLite regression on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: default
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: bash android/gradlew -p android connectedDebugAndroidTest --no-daemon --stacktrace
       - name: Upload APK and checksum
         uses: actions/upload-artifact@v4
         with:
