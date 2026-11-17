@@ -78,3 +78,9 @@ npm run build
 - Use `.env.example` as the checked-in configuration template and keep fixtures synthetic.
 - Treat old Polaris data as an external migration source: import, stage, validate, then promote it into current LocalData rows.
 - Tool changes must close the full loop: model visibility, execution, UI evidence, next-turn replay, and focused tests.
+
+## Android 自主心跳测试分支
+
+本分支增加了沿用原协作者与会话的一次性心跳、用户开启的自主续约、安静工作记录和独立 Android 测试包。
+
+[构建、安装与能力边界](docs/HEARTBEAT_ANDROID_BUILD.md)。模型执行需要应用运行时保持运行；系统提醒不代表后台已经调用模型。

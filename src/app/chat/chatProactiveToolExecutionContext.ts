@@ -1,13 +1,20 @@
+import { getOnceTriggerScheduleIssue } from '../../engines/triggers';
 import type { ToolContext } from '../../engines/toolExecutorTypes';
 import type { PolarisTriggerRule } from '../../types/domain';
 import type { ChatToolStoreBindings } from './chatToolActionTypes';
 
 function formatTriggerScheduleLabel(action: Parameters<ToolContext['createProactiveMessageRule']>[0]) {
+  if (action.schedule.kind === 'once') return `一次性 · ${new Date(action.schedule.at).toISOString()}`;
   return action.schedule.kind === 'daily'
     ? `每天 ${action.schedule.time}`
     : `每隔 ${action.schedule.everyMinutes} 分钟`;
 }
 function formatRuleScheduleLabel(rule: PolarisTriggerRule) {
+  if (rule.schedule.kind === 'once') {
+    return Number.isFinite(rule.schedule.at) && rule.schedule.at > 0
+      ? `一次性 · ${new Date(rule.schedule.at).toISOString()}`
+      : '一次性 · 时间无效，请重新设置';
+  }
   return rule.schedule.kind === 'daily'
     ? `每天 ${rule.schedule.time}`
     : `每隔 ${rule.schedule.everyMinutes} 分钟`;
@@ -40,6 +47,8 @@ export function buildProactiveToolExecutionContext(args: {
       if (!collaboratorId) {
         return { ok: false, error: '当前对话没有绑定协作者，不能创建主动消息规则。' };
       }
+      const issue = getOnceTriggerScheduleIssue(action.schedule);
+      if (issue) return { ok: false, error: issue };
       const prompt = action.prompt.trim();
       if (!prompt) {
         return { ok: false, error: '主动消息规则缺少提示词。' };
@@ -84,6 +93,8 @@ export function buildProactiveToolExecutionContext(args: {
             `enabled=${rule.enabled ? 'true' : 'false'}`,
             `schedule=${formatRuleScheduleLabel(rule)}`,
             `target=${formatRuleTargetLabel(rule)}`,
+            `delivery=${rule.action.delivery ?? 'message'}`,
+            `autonomous=${rule.action.autonomous === true ? 'true' : 'false'}`,
             `prompt=${rule.action.prompt}`
           ].join('\n')).join('\n\n')
         : '当前协作者还没有主动消息规则。';
@@ -99,10 +110,12 @@ export function buildProactiveToolExecutionContext(args: {
       if (!rule) {
         return { ok: false, error: `没有找到当前协作者的主动消息规则：${action.ruleId}` };
       }
+      const issue = action.schedule ? getOnceTriggerScheduleIssue(action.schedule) : null;
+      if (issue) return { ok: false, error: issue };
       const conversationMode = action.conversationMode;
       runtime.updateTriggerRule(rule.id, {
         ...(action.name ? { name: action.name } : {}),
-        ...(action.prompt ? { action: { prompt: action.prompt } } : {}),
+        ...(action.prompt ? { action: { ...rule.action, prompt: action.prompt } } : {}),
         ...(action.schedule ? { schedule: action.schedule } : {}),
         ...(conversationMode ? {
           target: {
@@ -115,7 +128,7 @@ export function buildProactiveToolExecutionContext(args: {
       const updatedRule: PolarisTriggerRule = {
         ...rule,
         ...(action.name ? { name: action.name } : {}),
-        ...(action.prompt ? { action: { prompt: action.prompt } } : {}),
+        ...(action.prompt ? { action: { ...rule.action, prompt: action.prompt } } : {}),
         ...(action.schedule ? { schedule: action.schedule } : {}),
         ...(conversationMode ? {
           target: {

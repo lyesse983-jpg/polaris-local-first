@@ -73,6 +73,7 @@ import {
 } from './chatReplyPersistence';
 
 type RequestReplyArgs = {
+  signal?: AbortSignal;
   ui: Pick<
     ChatUiReplyState,
     | 'abortControllerRef'
@@ -262,6 +263,7 @@ function settleConversationTaskAfterAssistantTurn(args: {
 }
 
 async function requestReplyRound({
+  signal,
   ui,
   chat,
   executeToolActions,
@@ -276,6 +278,7 @@ async function requestReplyRound({
   preferredOpenAiToolHistoryMode,
   continuation = INITIAL_CHAT_REPLY_CONTINUATION_STATE
 }: RequestReplyArgs): Promise<ChatReplyRunResult> {
+  if (signal?.aborted) return { status: 'aborted' };
   const {
     toolExchangeDepth,
     seenToolExchangeFingerprints,
@@ -352,6 +355,9 @@ async function requestReplyRound({
       recordChatSendPerformanceMark(conversationId, '聊天发送 · 首个回复已渲染');
     }
   });
+  const externalAbort = () => streaming.controller.abort();
+  if (signal?.aborted) externalAbort();
+  signal?.addEventListener('abort', externalAbort, { once: true });
   let preserveStreamingLifecycle = false;
   let activatedTaskThisTurn = false;
   let latestTaskState = activeRequestSnapshot.currentTask ?? null;
@@ -1065,6 +1071,7 @@ async function requestReplyRound({
       await persistChatReplyBoundary(chat.persistToDb, 'after-reply');
       recordChatSendPerformanceMark(conversationId, '聊天发送 · 回复结果已安全落盘');
     } finally {
+      signal?.removeEventListener('abort', externalAbort);
       streaming.finish(preserveStreamingLifecycle);
     }
   }
@@ -1079,7 +1086,7 @@ export async function requestReply(args: RequestReplyArgs): Promise<ChatReplyRun
       if (!(error instanceof ChatReplyContinuation)) {
         throw error;
       }
-      nextArgs = error.next;
+      nextArgs = { ...error.next, signal: args.signal };
     }
   }
 }

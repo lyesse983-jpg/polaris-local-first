@@ -1,3 +1,4 @@
+import { getOnceTriggerScheduleIssue } from '../triggers';
 import { asObject, normalizeStringArray } from './assistantToolProtocolShared';
 import type { ParseActionResult } from './assistantToolProtocolActionShared';
 import type { AssistantToolActionParseContext } from './assistantToolProtocolActionContext';
@@ -72,6 +73,14 @@ function normalizeDesktopCommandSequenceSteps(value: unknown) {
 
 function normalizeProactiveSchedule(action: Record<string, unknown>, options: { required: boolean }) {
   const nestedSchedule = asObject(action.schedule);
+  const afterMinutes = action.afterMinutes ?? nestedSchedule?.afterMinutes;
+  const explicitAt = action.at ?? nestedSchedule?.at;
+  const at = explicitAt ?? (typeof afterMinutes === 'number' && Number.isFinite(afterMinutes)
+    ? Date.now() + afterMinutes * 60_000 : undefined);
+  const hasOnceTime = Object.prototype.hasOwnProperty.call(action, 'afterMinutes')
+    || (nestedSchedule !== null && nestedSchedule !== undefined && Object.prototype.hasOwnProperty.call(nestedSchedule, 'afterMinutes'))
+    || Object.prototype.hasOwnProperty.call(action, 'at')
+    || (nestedSchedule !== null && nestedSchedule !== undefined && Object.prototype.hasOwnProperty.call(nestedSchedule, 'at'));
   const time = normalizeOptionalString(action.time) ?? normalizeOptionalString(nestedSchedule?.time);
   const everyMinutes =
     normalizePositiveInt(action.everyMinutes)
@@ -84,7 +93,9 @@ function normalizeProactiveSchedule(action: Record<string, unknown>, options: { 
       ? action.schedule_kind
       : typeof nestedSchedule?.kind === 'string'
         ? nestedSchedule.kind
-        : time
+        : hasOnceTime
+          ? 'once'
+          : time
           ? 'daily'
           : everyMinutes
             ? 'interval'
@@ -92,6 +103,16 @@ function normalizeProactiveSchedule(action: Record<string, unknown>, options: { 
 
   if (!scheduleKind && !options.required) {
     return { ok: true as const, schedule: undefined };
+  }
+
+  if (scheduleKind === 'once') {
+    if (explicitAt !== undefined && afterMinutes !== undefined) return { ok: false as const, issue: 'once 预约只能提供 at 或 afterMinutes 之一。' };
+    if (afterMinutes !== undefined && (typeof afterMinutes !== 'number' || !Number.isFinite(afterMinutes) || afterMinutes < 1 || afterMinutes > 43_200)) return { ok: false as const, issue: 'afterMinutes 需要在 1 至 43200 分钟之间。' };
+    if (typeof at !== 'number') return { ok: false as const, issue: '主动消息 once 规则缺少有效的 at（毫秒时间戳）。' };
+    const schedule = { kind: 'once' as const, at };
+    const issue = getOnceTriggerScheduleIssue(schedule);
+    if (issue) return { ok: false as const, issue };
+    return { ok: true as const, schedule };
   }
 
   if (scheduleKind === 'interval') {
@@ -116,7 +137,7 @@ function normalizeProactiveSchedule(action: Record<string, unknown>, options: { 
     };
   }
 
-  return { ok: false as const, issue: options.required ? '主动消息规则缺少 scheduleKind。' : '主动消息规则的 scheduleKind 只能是 daily 或 interval。' };
+  return { ok: false as const, issue: options.required ? '主动消息规则缺少 scheduleKind。' : '主动消息规则的 scheduleKind 只能是 daily、interval 或 once。' };
 }
 
 export function parseContentToolAction(

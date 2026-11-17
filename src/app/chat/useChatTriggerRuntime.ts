@@ -9,6 +9,7 @@ import { resolveTriggerConversationForTarget } from './triggerConversationResolu
 import { buildProactiveReplyNotification } from './proactiveReplyNotification';
 import { postNativeProactiveReplyNotification } from '../../native/localTriggerNotifications';
 import { selectChatConversations } from './liveConversationCatalog';
+import { getAutonomousTriggerBudgetIssue, MAX_AUTONOMOUS_TRIGGER_DURATION_MS } from './triggerRunPolicy';
 
 type TriggerGenerationState = {
   sending: boolean;
@@ -22,6 +23,8 @@ type UseChatTriggerRuntimeArgs = {
     conversationId: string;
     collaboratorId: string;
     messages: ChatMessage[];
+    silent?: boolean;
+    signal?: AbortSignal;
   }) => Promise<{ status: 'completed' | 'aborted' | 'failed' }>;
   setCommandStatus: (text: string, isError?: boolean) => void;
 };
@@ -53,6 +56,7 @@ export function useChatTriggerRuntime({
 }: UseChatTriggerRuntimeArgs) {
   const runningRuleIdRef = useRef<string | null>(null);
   const mountedRef = useRef(false);
+  const activeRunRef = useRef<{ conversationId: string; userId: string | null; controller: AbortController; ruleId: string } | null>(null);
   const generationByConversationIdRef = useRef(generationByConversationId);
   const [wakeTick, setWakeTick] = useState(0);
 
@@ -64,8 +68,19 @@ export function useChatTriggerRuntime({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      activeRunRef.current?.controller.abort();
     };
   }, []);
+
+
+  useEffect(() => {
+    const active = activeRunRef.current;
+    if (!active) return;
+    const latest = store.chat.readLatestState().conversations.find((item) => item.id === active.conversationId);
+    const newestUser = latest?.messages.filter((item) => item.role === 'user').slice(-1)[0]?.id ?? null;
+    const ruleStillExists = store.runtime.readLatestState().triggerRules.some((item) => item.id === active.ruleId);
+    if (!latest || !ruleStillExists || newestUser !== active.userId) active.controller.abort();
+  }, [store.chat.conversations, store.runtime.triggerRules]);
 
   useEffect(() => {
     if (!startupReady || typeof window === 'undefined') return;
@@ -129,7 +144,15 @@ export function useChatTriggerRuntime({
     runningRuleIdRef.current = rule.id;
 
     void (async () => {
+      let durationTimer: number | undefined;
       try {
+        const budgetIssue = getAutonomousTriggerBudgetIssue(rule);
+        if (budgetIssue) {
+          store.runtime.updateTriggerRule(rule.id, { enabled: false, nextRunAt: null, lastError: budgetIssue });
+          await store.runtime.persistToDb();
+          setCommandStatus(budgetIssue, true);
+          return;
+        }
         const persona = store.persona.readLatestState().personas.find((entry) => entry.id === rule.target.collaboratorId) ?? null;
         if (!persona) {
           store.runtime.markTriggerFailed(rule.id, `目标人格不存在：${rule.target.collaboratorId}`);
@@ -150,21 +173,40 @@ export function useChatTriggerRuntime({
           store.runtime.markTriggerFailed(rule.id, '触发器对话历史还没准备好');
           return;
         }
+        // Claim once before any model call, and durably commit through the existing runtime owner.
+        // A crash after this boundary leaves an inspectable consumed appointment, not a duplicate send.
+        const userId = writableConversation.messages.filter((item) => item.role === 'user').slice(-1)[0]?.id ?? null;
+        const controller = new AbortController();
+        activeRunRef.current = { conversationId: conversation.id, userId, controller, ruleId: rule.id };
+        const freshRule = store.runtime.readLatestState().triggerRules.find((item) => item.id === rule.id);
+        if (!freshRule?.enabled || freshRule.nextRunAt !== rule.nextRunAt) return;
+        store.runtime.markTriggerFired(rule.id);
+        await store.runtime.persistToDb();
+        const freshBody = await store.chat.ensureConversationWritable(conversation.id);
+        if (!freshBody || controller.signal.aborted || generationByConversationIdRef.current[conversation.id]?.sending) return;
+        const latestUserId = freshBody.messages.filter((item) => item.role === 'user').slice(-1)[0]?.id ?? null;
+        if (latestUserId !== userId) return;
         const triggerEvent = store.runtime.consumeTriggerEvent(rule.id);
         const triggerMessage = createTriggerMessage(rule, triggerEvent);
-        const nextMessages = [...writableConversation.messages, triggerMessage];
+        const nextMessages = [...freshBody.messages, triggerMessage];
         const messageCountBeforeReply = nextMessages.length;
-        store.chat.addMessage(writableConversation, triggerMessage);
-        store.runtime.markTriggerFired(rule.id);
-        setCommandStatus(`触发器已投递：${rule.name}`);
+        store.chat.addMessage(freshBody, triggerMessage);
+        await store.chat.persistToDb();
+        setCommandStatus(`心跳已开始：${rule.name}`);
+        durationTimer = window.setTimeout(() => controller.abort(), MAX_AUTONOMOUS_TRIGGER_DURATION_MS);
 
         const result = await runReply({
-          conversationId: writableConversation.conversationId,
+          conversationId: freshBody.conversationId,
           collaboratorId: rule.target.collaboratorId,
-          messages: nextMessages
+          messages: nextMessages,
+          silent: rule.action.delivery === 'silent',
+          signal: controller.signal
         });
 
-        if (result.status !== 'aborted' && mountedRef.current) {
+        if (result.status === 'failed') {
+          store.runtime.markTriggerFailed(rule.id, '本次心跳运行失败，已保留工具证据。');
+        }
+        if (result.status === 'completed' && rule.action.delivery !== 'silent' && mountedRef.current) {
           const latestChatState = store.chat.readLatestState();
           const latestSpaceState = store.space.readLatestState();
           const latestConversation = latestChatState.conversations.find((entry) => entry.id === writableConversation.conversationId) ?? null;
@@ -188,8 +230,17 @@ export function useChatTriggerRuntime({
         store.runtime.markTriggerFailed(rule.id, message);
         setCommandStatus(`触发器失败：${message}`, true);
       } finally {
+        if (durationTimer !== undefined) window.clearTimeout(durationTimer);
+        try {
+          await store.runtime.persistToDb();
+          await store.chat.persistToDb();
+        } catch {
+          setCommandStatus('心跳记录尚未确认保存，请检查本地数据状态。', true);
+        }
+        activeRunRef.current = null;
         if (runningRuleIdRef.current === rule.id) {
           runningRuleIdRef.current = null;
+          if (mountedRef.current) setWakeTick((tick) => tick + 1);
         }
       }
     })();

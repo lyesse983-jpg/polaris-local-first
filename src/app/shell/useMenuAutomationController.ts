@@ -1,5 +1,6 @@
 import type { I18nTranslator } from '../../i18n';
 import { useSpaceStore } from '../../stores/spaceStore';
+import { useRuntimeStore } from '../../stores/runtimeStore';
 import type {
   Persona,
   PolarisCompanionHostState,
@@ -27,6 +28,8 @@ export type MenuAutomationRuleSeed = {
   schedule: PolarisTriggerSchedule;
   prompt: string;
   name?: string;
+  delivery?: 'message' | 'silent';
+  autonomous?: boolean;
 };
 
 type UseMenuAutomationControllerArgs = {
@@ -66,15 +69,14 @@ export function useMenuAutomationController({
   ui,
   copy
 }: UseMenuAutomationControllerArgs) {
-  const createAutomationRule = (seed: MenuAutomationRuleSeed) => createAutomationRuleForCollaborator({
-    seed,
-    personas,
-    createTriggerRule,
-    ui,
-    copy
-  });
+  const createAutomationRule = (seed: MenuAutomationRuleSeed) => {
+    const id = createAutomationRuleForCollaborator({ seed, personas, createTriggerRule, ui, copy });
+    if (id && seed.autonomous) useRuntimeStore.getState().setToolPromptGroupEnabled('proactive', true);
+    return id;
+  };
 
   const updateAutomationRule = (ruleId: string, patch: Partial<PolarisTriggerRule>) => {
+    if (patch.action?.autonomous === true) useRuntimeStore.getState().setToolPromptGroupEnabled('proactive', true);
     updateAutomationRuleForCollaborator({
       ruleId,
       patch,

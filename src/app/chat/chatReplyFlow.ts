@@ -64,7 +64,9 @@ export function createChatReplyRunner({
     conversationId: string;
     collaboratorId: string;
     messages: ChatMessage[];
+    signal?: AbortSignal;
   }) => {
+    if (params.signal?.aborted) return { status: 'aborted' } satisfies ChatReplyRunResult;
     const writableConversation = await store.chat.ensureConversationWritable(params.conversationId);
     if (!writableConversation) {
       return { status: 'failed' } satisfies ChatReplyRunResult;
@@ -254,6 +256,7 @@ export function createChatReplyRunner({
           `feedback ${initialRequestSnapshot.runtimeFeedbackEvents.length}`
         ]
       });
+      if (params.signal?.aborted) return { status: 'aborted' } satisfies ChatReplyRunResult;
       result = await requestReply({
         ui: ui.getConversationGenerationControls(
           resolveGenerationKey?.({

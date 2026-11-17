@@ -16,7 +16,10 @@ type UtilityToolKind = Extract<
 const PROACTIVE_MESSAGE_RULES = [
   '- 只有用户打开“主动消息”工具组后，这些工具才会出现在当前请求里。',
   '- 这些工具只管理当前协作者的主动消息规则；不要跨协作者替别人查看、修改或取消。',
-  '- 修改或取消前如果不知道 ruleId，先用 listProactiveMessageRules 查看。'
+  '- 修改或取消前如果不知道 ruleId，先用 listProactiveMessageRules 查看。',
+  '- once 是一次性预约：afterMinutes 表示多久后醒来（1 至 43200 分钟）；也可用 at 毫秒时间戳，二者只填一个，安排在 1 分钟至 30 天之后，prompt 保存本次决定的原因和下次要接着做的事。',
+  '- 当前唤醒事件明确标注用户已开启自主心跳时，可以自行选择下一次时间，用 updateProactiveMessageRule 更新事件提供的同一个 ruleId；不要另建固定间隔来假装自主预约。',
+  '- 自主心跳、静默模式由用户在界面授权；这些工具不能自行开启。关闭、暂停或取消的规则不应擅自恢复。'
 ];
 
 function buildStartTaskRules(context?: ToolPromptContext) {
@@ -508,14 +511,16 @@ export const UTILITY_TOOL_DEFINITION_MAP = {
     brief: '创建主动消息规则',
     schema: {
       name: 'createProactiveMessageRule',
-      description: '为当前协作者创建一条主动消息规则。规则会保存到设置里的主动消息列表，之后按时间触发，让协作者主动开口。',
+      description: '为当前协作者创建时间规则。支持一次性预约，或用户要求的每日/间隔提醒。到点后沿用当前协作者和会话上下文。',
       parameters: objectParameters({
-        prompt: stringProperty('触发时交给协作者的提示词，写清楚到点后要主动说什么、以什么语气/目标开口。'),
-        scheduleKind: stringProperty('触发时间类型。daily 表示每天固定时间；interval 表示每隔一段时间。', {
-          enum: ['daily', 'interval']
+        prompt: stringProperty('保存预约原因、相关话题和到点后要继续的具体事项；唤醒后可以先检查上下文，不必重复问候。'),
+        scheduleKind: stringProperty('once 表示只执行一次；daily 表示每天固定时间；interval 表示固定间隔。自主选择下一次机会用 once。', {
+          enum: ['daily', 'interval', 'once']
         }),
         time: stringProperty('scheduleKind=daily 时填写，24 小时制 HH:mm，例如 09:30。'),
         everyMinutes: numberProperty('scheduleKind=interval 时填写，每隔多少分钟触发一次。'),
+        afterMinutes: numberProperty('once 预约可用的相对分钟数，1 至 43200；与 at 二选一，程序按当前时间计算。'),
+        at: numberProperty('scheduleKind=once 时填写，下一次唤醒的绝对毫秒时间戳；需在当前时间的 1 分钟至 30 天之后。'),
         conversationMode: stringProperty('fixed 表示固定投递到当前对话；follow-latest 表示投递到这个协作者最近的对话。默认 fixed。', {
           enum: ['fixed', 'follow-latest']
         }),
@@ -527,10 +532,10 @@ export const UTILITY_TOOL_DEFINITION_MAP = {
       '主动消息动作：',
       '1. createProactiveMessageRule：为当前协作者创建一条主动消息规则，之后由 Polaris 按规则让 TA 主动开口。',
       ...PROACTIVE_MESSAGE_RULES,
-      '- 只有用户明确想让你以后主动找 TA、按时间提醒、定期问候或设置主动消息时，才使用它。',
+      '- 只有用户明确想让你以后主动找 TA、按时间提醒、定期问候或设置主动消息时，才创建新规则；已获授权的自主心跳应更新当前规则。',
       '- 这个工具创建的是设置里的普通主动消息规则；用户之后可以在设置 → 主动消息里关闭、修改或删除。',
       '- 默认投递到当前对话；如果用户想“无论我之后在哪个对话都由这个协作者主动说”，conversationMode 用 follow-latest。',
-      '- 不要为了普通回答、一次性补充、你自己想延伸话题或未经用户同意的自启动而创建规则。'
+      '- 普通回答和随口延伸话题不代表用户同意启用自主心跳；没有明确授权时，不要自行创建或恢复后台规则。'
     ]
   },
   listProactiveMessageRules: {
@@ -561,11 +566,13 @@ export const UTILITY_TOOL_DEFINITION_MAP = {
       parameters: objectParameters({
         ruleId: stringProperty('要修改的主动消息规则 id。先用 listProactiveMessageRules 查看。'),
         prompt: stringProperty('可选。新的触发提示词。'),
-        scheduleKind: stringProperty('可选。新的触发时间类型。daily 表示每天固定时间；interval 表示每隔一段时间。', {
-          enum: ['daily', 'interval']
+        scheduleKind: stringProperty('可选。once 表示下一次单次预约；daily 表示每天固定时间；interval 表示固定间隔。', {
+          enum: ['daily', 'interval', 'once']
         }),
         time: stringProperty('scheduleKind=daily 时填写，24 小时制 HH:mm，例如 21:30。'),
         everyMinutes: numberProperty('scheduleKind=interval 时填写，每隔多少分钟触发一次。'),
+        afterMinutes: numberProperty('once 预约可用的相对分钟数，1 至 43200；与 at 二选一，程序按当前时间计算。'),
+        at: numberProperty('scheduleKind=once 时填写，下一次唤醒的绝对毫秒时间戳；需在当前时间的 1 分钟至 30 天之后。'),
         conversationMode: stringProperty('可选。fixed 表示固定投递到当前对话；follow-latest 表示投递到这个协作者最近的对话。', {
           enum: ['fixed', 'follow-latest']
         }),

@@ -400,8 +400,9 @@ describe('assistantToolProtocolRequestTools', () => {
     expect(tool?.function.parameters).toMatchObject({
       properties: {
         scheduleKind: {
-          enum: ['daily', 'interval']
-        }
+          enum: ['daily', 'interval', 'once']
+        },
+        at: { type: 'number' }
       },
       required: ['prompt', 'scheduleKind']
     });

@@ -45,6 +45,7 @@ vi.mock('@capacitor/local-notifications', () => ({
 }));
 
 import {
+  extractAndroidTriggerAlarmTap,
   buildNativeTriggerNotifications,
   consumeDeliveredNativeTriggerNotificationTaps,
   extractNativeTriggerNotificationTap,
@@ -85,8 +86,8 @@ describe('buildNativeTriggerNotifications', () => {
 
     expect(notification).toEqual(expect.objectContaining({
       id: resolveTriggerNotificationId('trigger-nova'),
-      title: 'Nova 想找你',
-      body: '晚安提醒',
+      title: 'Nova · 心跳预约',
+      body: '晚安提醒 · 打开 Polaris 后继续',
       autoCancel: true,
       extra: {
         polarisKind: 'polaris-trigger-v1',
@@ -133,7 +134,7 @@ describe('extractNativeTriggerNotificationTap', () => {
       notification: {
         id: 1,
         title: 'Nova',
-        body: '晚安提醒',
+        body: '晚安提醒 · 打开 Polaris 后继续',
         extra: {
           polarisKind: 'polaris-trigger-v1',
           ruleId: 'trigger-nova',
@@ -212,7 +213,7 @@ describe('syncNativeTriggerNotifications', () => {
     expect(mocks.localNotifications.schedule).toHaveBeenCalledWith({
       notifications: [
         expect.objectContaining({
-          body: '晚安提醒',
+          body: '晚安提醒 · 打开 Polaris 后继续',
           channelId: 'polaris-triggers',
           extra: expect.objectContaining({
             ruleId: 'trigger-nova'
@@ -242,8 +243,8 @@ describe('syncNativeTriggerNotifications', () => {
       notifications: [
         expect.objectContaining({
           id: resolveTriggerNotificationId('trigger-nova'),
-          title: 'Nova 想找你',
-          body: '晚安提醒',
+          title: 'Nova · 心跳预约',
+          body: '晚安提醒 · 打开 Polaris 后继续',
           ruleId: 'trigger-nova',
           scheduledFor: 2_000
         })
@@ -347,8 +348,8 @@ describe('syncNativeTriggerNotifications', () => {
       notifications: [
         {
           id: 21,
-          title: 'Nova 想找你',
-          body: '晚安提醒',
+          title: 'Nova · 心跳预约',
+          body: '晚安提醒 · 打开 Polaris 后继续',
           extra: {
             polarisKind: 'polaris-trigger-v1',
             ruleId: 'trigger-nova',
@@ -374,5 +375,18 @@ describe('syncNativeTriggerNotifications', () => {
         })
       ]
     });
+  });
+});
+
+
+describe('quiet heartbeat notification boundary', () => {
+  it('does not publish a wake-up notification for a silent rule', () => {
+    expect(buildNativeTriggerNotifications([buildRule({ action: { prompt: '整理相册', delivery: 'silent' } })], [persona], 1_000)).toEqual([]);
+  });
+  it('rejects malformed native alarm tap payloads', () => {
+    expect(extractAndroidTriggerAlarmTap({ ruleId: 'r', scheduledFor: 2000 })).toEqual({ ruleId: 'r', scheduledFor: 2000 });
+    expect(extractAndroidTriggerAlarmTap({ ruleId: 'r', scheduledFor: NaN })).toBeNull();
+    expect(extractAndroidTriggerAlarmTap({ ruleId: '', scheduledFor: 2000 })).toBeNull();
+    expect(extractAndroidTriggerAlarmTap('r')).toBeNull();
   });
 });

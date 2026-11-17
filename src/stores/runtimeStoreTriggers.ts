@@ -55,13 +55,23 @@ export function updateRuntimeTriggerRule(
 ): PolarisTriggerRule | null {
   const now = Date.now();
   const schedule = patch.schedule ?? rule.schedule;
+  const validOnce = schedule.kind !== 'once' || (Number.isFinite(schedule.at) && schedule.at > 0
+    && Number.isFinite(new Date(schedule.at).getTime()));
+  const nextRunAt = Object.prototype.hasOwnProperty.call(patch, 'nextRunAt')
+    ? patch.nextRunAt
+    : patch.schedule
+      ? (validOnce ? resolveNextTriggerRunAt(schedule, now) : null)
+      : rule.nextRunAt;
+  const rearmCompletedOnce = patch.schedule !== undefined && rule.schedule.kind === 'once'
+    && rule.lastRunAt !== null && validOnce;
   return normalizeTriggerRules([{
     ...rule,
     ...patch,
     target: patch.target ?? rule.target,
     action: patch.action ?? rule.action,
     schedule,
-    nextRunAt: patch.nextRunAt ?? (patch.schedule ? resolveNextTriggerRunAt(schedule, now) : rule.nextRunAt),
+    enabled: patch.enabled ?? (rearmCompletedOnce ? true : rule.enabled),
+    nextRunAt,
     updatedAt: now
   }])[0] ?? null;
 }

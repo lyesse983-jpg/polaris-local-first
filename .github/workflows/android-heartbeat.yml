@@ -1,0 +1,63 @@
+name: Android heartbeat test APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'codex/polaris-heartbeat*'
+      - 'heartbeat/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-heartbeat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Verify heartbeat contracts
+        run: >-
+          npx vitest run
+          src/engines/triggers.test.ts
+          src/stores/runtimeStoreTriggers.test.ts
+          src/app/chat/triggerMessage.test.ts
+          src/app/chat/triggerConversationResolution.test.ts
+          src/native/localTriggerNotifications.test.ts
+          src/app/chat/heartbeatScheduling.test.ts
+          src/app/chat/silentTriggerChatPort.test.ts
+          src/ui/shell/menu/automationHeartbeatForm.test.ts
+          src/engines/tool-protocol/heartbeatScheduleParser.test.ts
+      - name: Typecheck and build web assets
+        run: npm run build
+      - name: Sync Android plugins and assets
+        run: npx cap sync android
+      - name: Prepare Android SDK
+        run: >-
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+      - name: Build separately installable test APK
+        run: bash scripts/build-heartbeat-android.sh --prepared
+      - name: Upload APK and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: polaris-heartbeat-debug-${{ github.sha }}
+          path: |
+            artifacts/polaris-heartbeat-debug.apk
+            artifacts/polaris-heartbeat-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 14

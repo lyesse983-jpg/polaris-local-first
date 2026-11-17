@@ -237,6 +237,10 @@ export type CanonicalToolAction =
         | {
             kind: 'interval';
             everyMinutes: number;
+          }
+        | {
+            kind: 'once';
+            at: number;
           };
       conversationMode?: 'follow-latest' | 'fixed';
       targetLabel?: string;
@@ -258,6 +262,10 @@ export type CanonicalToolAction =
         | {
             kind: 'interval';
             everyMinutes: number;
+          }
+        | {
+            kind: 'once';
+            at: number;
           };
       conversationMode?: 'follow-latest' | 'fixed';
       targetLabel?: string;

@@ -24,6 +24,8 @@ type CreateAutomationRuleArgs = {
     schedule: PolarisTriggerSchedule;
     prompt: string;
     name?: string;
+    delivery?: 'message' | 'silent';
+    autonomous?: boolean;
   };
   personas: Persona[];
   createTriggerRule: (seed: {
@@ -56,7 +58,9 @@ export function createAutomationRuleForCollaborator({
   }
   const defaultName = seed.schedule.kind === 'daily'
     ? copy.t('settings.automation.defaultNameDaily', { name: collaborator.name, time: seed.schedule.time })
-    : copy.t('settings.automation.defaultNameInterval', { name: collaborator.name, minutes: seed.schedule.everyMinutes });
+    : seed.schedule.kind === 'interval'
+      ? copy.t('settings.automation.defaultNameInterval', { name: collaborator.name, minutes: seed.schedule.everyMinutes })
+      : `${collaborator.name} · ${new Date(seed.schedule.at).toLocaleString()}`;
   const conversationMode = seed.conversationMode === 'fixed' ? 'fixed' : 'follow-latest';
   const conversationId = conversationMode === 'fixed' ? seed.conversationId?.trim() || null : null;
   if (conversationMode === 'fixed' && !conversationId) {
@@ -72,7 +76,9 @@ export function createAutomationRuleForCollaborator({
       conversationId
     },
     action: {
-      prompt: trimmedPrompt
+      prompt: trimmedPrompt,
+      ...(seed.delivery ? { delivery: seed.delivery } : {}),
+      ...(seed.autonomous ? { autonomous: true } : {})
     }
   });
 }
