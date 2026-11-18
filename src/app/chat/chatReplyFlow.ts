@@ -67,6 +67,7 @@ export function createChatReplyRunner({
     collaboratorId: string;
     messages: ChatMessage[];
     signal?: AbortSignal;
+    onAssistantMessageCommitted?: (messageId: string) => void;
   }) => {
     if (params.signal?.aborted) return { status: 'aborted' } satisfies ChatReplyRunResult;
     const generationControls = ui.getConversationGenerationControls(resolveGenerationKey?.({

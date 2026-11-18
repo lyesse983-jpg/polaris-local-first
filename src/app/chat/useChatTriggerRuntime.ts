@@ -6,7 +6,7 @@ import type { ChatMessage, PolarisTriggerRule } from '../../types/domain';
 import type { ChatStoreBindings } from './useChatStoreBindings';
 import { createTriggerMessage } from './triggerMessage';
 import { resolveTriggerConversationForTarget } from './triggerConversationResolution';
-import { buildProactiveReplyNotification } from './proactiveReplyNotification';
+import { createProactiveReplyPublisher } from './proactiveReplyPublisher';
 import { postNativeProactiveReplyNotification } from '../../native/localTriggerNotifications';
 import { selectChatConversations } from './liveConversationCatalog';
 import { getAutonomousTriggerBudgetIssue, MAX_AUTONOMOUS_TRIGGER_DURATION_MS } from './triggerRunPolicy';
@@ -25,6 +25,7 @@ type UseChatTriggerRuntimeArgs = {
     messages: ChatMessage[];
     silent?: boolean;
     signal?: AbortSignal;
+    onAssistantMessageCommitted?: (messageId: string) => void;
   }) => Promise<{ status: 'completed' | 'aborted' | 'failed' }>;
   setCommandStatus: (text: string, isError?: boolean) => void;
 };
@@ -145,6 +146,7 @@ export function useChatTriggerRuntime({
 
     void (async () => {
       let durationTimer: number | undefined;
+      let waitForGeneration = false;
       try {
         const budgetIssue = getAutonomousTriggerBudgetIssue(rule);
         if (budgetIssue) {
@@ -165,6 +167,7 @@ export function useChatTriggerRuntime({
           return;
         }
         if (generationByConversationIdRef.current[conversation.id]?.sending) {
+          waitForGeneration = true;
           return;
         }
 
@@ -189,42 +192,33 @@ export function useChatTriggerRuntime({
         const triggerEvent = store.runtime.consumeTriggerEvent(rule.id);
         const triggerMessage = createTriggerMessage(rule, triggerEvent);
         const nextMessages = [...freshBody.messages, triggerMessage];
-        const messageCountBeforeReply = nextMessages.length;
+        const messageIdsBeforeReply = new Set(nextMessages.map((message) => message.id));
         store.chat.addMessage(freshBody, triggerMessage);
         await store.chat.persistToDb();
         setCommandStatus(`心跳已开始：${rule.name}`);
         durationTimer = window.setTimeout(() => controller.abort(), MAX_AUTONOMOUS_TRIGGER_DURATION_MS);
 
+        const publisher = rule.action.delivery === 'silent' ? null : createProactiveReplyPublisher({
+          collaboratorId: rule.target.collaboratorId, collaboratorName: persona.name,
+          conversationId: conversation.id, messageIdsBeforeReply,
+          getConversation: () => store.chat.readLatestState().conversations.find((item) => item.id === conversation.id) ?? null,
+          enqueue: (notification) => { if (mountedRef.current) store.space.enqueueReplyNotification(notification); },
+          getNotifications: () => store.space.readLatestState().replyNotifications ?? [],
+          postNative: postNativeProactiveReplyNotification
+        });
         const result = await runReply({
           conversationId: freshBody.conversationId,
           collaboratorId: rule.target.collaboratorId,
           messages: nextMessages,
           silent: rule.action.delivery === 'silent',
-          signal: controller.signal
+          signal: controller.signal,
+          onAssistantMessageCommitted: publisher ? (messageId) => { if (mountedRef.current) publisher.publish(messageId); } : undefined
         });
 
         if (result.status === 'failed') {
           store.runtime.markTriggerFailed(rule.id, '本次心跳运行失败，已保留工具证据。');
         }
-        if (result.status === 'completed' && rule.action.delivery !== 'silent' && mountedRef.current) {
-          const latestChatState = store.chat.readLatestState();
-          const latestSpaceState = store.space.readLatestState();
-          const latestConversation = latestChatState.conversations.find((entry) => entry.id === writableConversation.conversationId) ?? null;
-          const notification = buildProactiveReplyNotification({
-            conversation: latestConversation,
-            collaboratorId: rule.target.collaboratorId,
-            collaboratorName: persona.name,
-            messageCountBeforeReply,
-            currentView: {
-              activeWorld: latestSpaceState.activeWorld,
-              activeConversationId: latestChatState.activeConversationId
-            }
-          });
-          if (notification) {
-            store.space.enqueueReplyNotification(notification);
-            void postNativeProactiveReplyNotification(notification);
-          }
-        }
+
       } catch (error) {
         const message = error instanceof Error ? error.message : '触发器执行失败';
         store.runtime.markTriggerFailed(rule.id, message);
@@ -232,17 +226,19 @@ export function useChatTriggerRuntime({
       } finally {
         if (durationTimer !== undefined) window.clearTimeout(durationTimer);
         try {
-          await store.runtime.persistToDb();
-          await store.chat.persistToDb();
+          if (!waitForGeneration) {
+            await store.runtime.persistToDb();
+            await store.chat.persistToDb();
+          }
         } catch {
           setCommandStatus('心跳记录尚未确认保存，请检查本地数据状态。', true);
         }
         activeRunRef.current = null;
         if (runningRuleIdRef.current === rule.id) {
           runningRuleIdRef.current = null;
-          if (mountedRef.current) setWakeTick((tick) => tick + 1);
+          if (mountedRef.current && !waitForGeneration) setWakeTick((tick) => tick + 1);
         }
       }
     })();
-  }, [runReply, setCommandStatus, startupReady, store, wakeTick]);
+  }, [generationByConversationId, runReply, setCommandStatus, startupReady, store, wakeTick]);
 }

@@ -46,6 +46,8 @@ vi.mock('@capacitor/local-notifications', () => ({
 
 import {
   extractAndroidTriggerAlarmTap,
+  extractNativeReplyNotificationTap,
+  registerNativeReplyNotificationTapListener,
   buildNativeTriggerNotifications,
   consumeDeliveredNativeTriggerNotificationTaps,
   extractNativeTriggerNotificationTap,
@@ -80,6 +82,23 @@ function buildRule(patch: Partial<PolarisTriggerRule> = {}): PolarisTriggerRule 
   };
 }
 
+describe('native reply notification taps', () => {
+  it('opens only a real reply target, without turning an appointment reminder into a reply tap', async () => {
+    capacitorState.isNativePlatform = true; capacitorState.platform = 'android'; capacitorState.plugins.add('LocalNotifications');
+    let listener: ((event: { notification: { extra: unknown } }) => void) | undefined;
+    const remove = vi.fn(async () => undefined);
+    mocks.localNotifications.addListener.mockImplementation(async (_name, callback) => { listener = callback; return {remove}; });
+    const onTap = vi.fn();
+    const handle = await registerNativeReplyNotificationTapListener(onTap);
+    listener?.({notification: {extra: {polarisKind: 'polaris-trigger-v1', ruleId: 'test', scheduledFor: 1}}});
+    listener?.({notification: {extra: {polarisKind: 'polaris-proactive-reply-v1', conversationId: 'chat', collaboratorId: 'persona'}}});
+    expect(onTap).toHaveBeenCalledExactlyOnceWith({conversationId: 'chat', collaboratorId: 'persona'});
+    expect(extractNativeReplyNotificationTap({polarisKind: 'polaris-proactive-reply-v1', conversationId: '', collaboratorId: 'persona'})).toBeNull();
+    await handle?.remove(); expect(remove).toHaveBeenCalledOnce();
+    capacitorState.isNativePlatform = false; capacitorState.plugins.clear();
+  });
+});
+
 describe('buildNativeTriggerNotifications', () => {
   it('builds a dated local notification that points back to the trigger rule', () => {
     const [notification] = buildNativeTriggerNotifications([buildRule()], [persona], 1_000);
@@ -87,7 +106,7 @@ describe('buildNativeTriggerNotifications', () => {
     expect(notification).toEqual(expect.objectContaining({
       id: resolveTriggerNotificationId('trigger-nova'),
       title: 'Nova · 心跳预约',
-      body: '晚安提醒 · 打开 Polaris 后继续',
+      body: '晚安提醒 · 预约到点；请保持 Polaris 运行，回复会另行通知',
       autoCancel: true,
       extra: {
         polarisKind: 'polaris-trigger-v1',
@@ -134,7 +153,7 @@ describe('extractNativeTriggerNotificationTap', () => {
       notification: {
         id: 1,
         title: 'Nova',
-        body: '晚安提醒 · 打开 Polaris 后继续',
+        body: '晚安提醒 · 预约到点；请保持 Polaris 运行，回复会另行通知',
         extra: {
           polarisKind: 'polaris-trigger-v1',
           ruleId: 'trigger-nova',
@@ -213,7 +232,7 @@ describe('syncNativeTriggerNotifications', () => {
     expect(mocks.localNotifications.schedule).toHaveBeenCalledWith({
       notifications: [
         expect.objectContaining({
-          body: '晚安提醒 · 打开 Polaris 后继续',
+          body: '晚安提醒 · 预约到点；请保持 Polaris 运行，回复会另行通知',
           channelId: 'polaris-triggers',
           extra: expect.objectContaining({
             ruleId: 'trigger-nova'
@@ -244,7 +263,7 @@ describe('syncNativeTriggerNotifications', () => {
         expect.objectContaining({
           id: resolveTriggerNotificationId('trigger-nova'),
           title: 'Nova · 心跳预约',
-          body: '晚安提醒 · 打开 Polaris 后继续',
+          body: '晚安提醒 · 预约到点；请保持 Polaris 运行，回复会另行通知',
           ruleId: 'trigger-nova',
           scheduledFor: 2_000
         })
@@ -349,7 +368,7 @@ describe('syncNativeTriggerNotifications', () => {
         {
           id: 21,
           title: 'Nova · 心跳预约',
-          body: '晚安提醒 · 打开 Polaris 后继续',
+          body: '晚安提醒 · 预约到点；请保持 Polaris 运行，回复会另行通知',
           extra: {
             polarisKind: 'polaris-trigger-v1',
             ruleId: 'trigger-nova',

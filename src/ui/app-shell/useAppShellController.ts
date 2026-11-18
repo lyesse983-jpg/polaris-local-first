@@ -1,4 +1,7 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import { useChatStore } from '../../stores/chatStore';
+import { useSpaceStore } from '../../stores/spaceStore';
+import { registerNativeReplyNotificationTapListener, type NativeReplyNotificationTap } from '../../native/localTriggerNotifications';
 import { buildConversationCardSummary } from '../../app/collection/conversationCardSummary';
 import { resolveCollectionRenderItemCount } from '../../app/shell/collectionRenderLoad';
 import { deriveAppShellState } from '../../app/shell/deriveAppShellState';
@@ -297,7 +300,9 @@ export function useAppShellController() {
     },
     onOpenSettings: overlays.collectionOpenSettings
   };
-  const openReplyNotification = (notification: typeof replyNotifications[number]) => {
+  const openReplyNotification = (notification: NativeReplyNotificationTap & { id?: string }) => {
+    overlays.modals.setMenuOpen(false);
+    collection.setInfoFullscreenOpen(false);
     if (notification.conversationId !== activeConversationId) {
       clearPendingAttachments();
       clearPendingCardReference();
@@ -305,8 +310,28 @@ export function useAppShellController() {
     setFrontstageCollaboratorId(notification.collaboratorId);
     setActiveConversation(notification.conversationId);
     setWorld('chat');
-    dismissReplyNotification(notification.id);
+    if (notification.id) dismissReplyNotification(notification.id);
   };
+  const chatHydrated = useChatStore((state) => state.hydrated);
+  const openNativeReplyRef = useRef<(tap: NativeReplyNotificationTap) => void>(() => undefined);
+  openNativeReplyRef.current = (tap) => {
+    const target = useChatStore.getState().conversations.find((item) => item.id === tap.conversationId);
+    if (!target || target.collaboratorId !== tap.collaboratorId) return;
+    const currentNotice = useSpaceStore.getState().replyNotifications.find((item) => item.conversationId === tap.conversationId);
+    openReplyNotification({ ...tap, id: currentNotice?.id });
+  };
+  useEffect(() => {
+    if (!chatHydrated) return;
+    let cancelled = false;
+    let remove: (() => Promise<void>) | undefined;
+    void registerNativeReplyNotificationTapListener((tap) => {
+      if (!cancelled) openNativeReplyRef.current(tap);
+    }).then((handle) => {
+      if (cancelled) void handle?.remove();
+      else remove = handle ? () => handle.remove() : undefined;
+    });
+    return () => { cancelled = true; void remove?.(); };
+  }, [chatHydrated]);
   return {
     activeWorld,
     shellWorld: world.shellWorld,

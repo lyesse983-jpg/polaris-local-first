@@ -106,7 +106,7 @@ export function buildNativeTriggerNotifications(
     return [{
       id: resolveTriggerNotificationId(rule.id),
       title: `${persona.name} · 心跳预约`,
-      body: `${rule.name} · 打开 Polaris 后继续`,
+      body: `${rule.name} · 预约到点；请保持 Polaris 运行，回复会另行通知`,
       schedule: {
         at: new Date(rule.nextRunAt),
         allowWhileIdle: true
@@ -362,4 +362,28 @@ export async function registerNativeTriggerNotificationTapListener(
     await Promise.all(handles.map((handle) => handle.remove()));
     return null;
   }
+}
+
+
+export type NativeReplyNotificationTap = { conversationId: string; collaboratorId: string };
+
+export function extractNativeReplyNotificationTap(value: unknown): NativeReplyNotificationTap | null {
+  if (!value || typeof value !== 'object') return null;
+  const input = value as Partial<NativeProactiveReplyNotificationExtra>;
+  return input.polarisKind === POLARIS_PROACTIVE_REPLY_NOTIFICATION_KIND
+    && typeof input.conversationId === 'string' && input.conversationId.trim().length > 0
+    && typeof input.collaboratorId === 'string' && input.collaboratorId.trim().length > 0
+    ? { conversationId: input.conversationId, collaboratorId: input.collaboratorId } : null;
+}
+
+export async function registerNativeReplyNotificationTapListener(
+  onTap: (tap: NativeReplyNotificationTap) => void
+): Promise<PluginListenerHandle | null> {
+  if (!canUseLocalNotifications()) return null;
+  try {
+    return await LocalNotifications.addListener('localNotificationActionPerformed', (action) => {
+      const tap = extractNativeReplyNotificationTap(action?.notification?.extra);
+      if (tap) onTap(tap);
+    });
+  } catch { return null; }
 }

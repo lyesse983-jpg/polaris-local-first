@@ -75,6 +75,7 @@ import {
 
 type RequestReplyArgs = {
   signal?: AbortSignal;
+  onAssistantMessageCommitted?: (messageId: string) => void;
   ui: Pick<
     ChatUiReplyState,
     | 'abortControllerRef'
@@ -273,6 +274,7 @@ async function requestReplyRound({
   collaboratorId,
   messages,
   requestMessages = messages,
+  onAssistantMessageCommitted,
   requestSnapshot,
   refreshRequestSnapshot,
   loadSemanticRecallConversations,
@@ -526,6 +528,11 @@ async function requestReplyRound({
         storedToolCalls?.length ? `tool calls ${storedToolCalls.length}` : null
       ]
     });
+    if (onAssistantMessageCommitted && !isToolOnlyTurn && visibleContent.trim()) {
+      // Publish only complete, durably stored prose; tools may still have follow-up work.
+      await persistChatReplyBoundary(chat.persistToDb, 'after-reply');
+      try { onAssistantMessageCommitted(placeholderId); } catch { /* Delivery must not fail a model turn. */ }
+    }
     const currentTask = chat.getConversationTask(conversationId);
     if (currentTask && taskUpdate) {
       const nextTask = applyConversationTaskModelUpdate({
@@ -1093,7 +1100,7 @@ export async function requestReply(args: RequestReplyArgs): Promise<ChatReplyRun
       if (!(error instanceof ChatReplyContinuation)) {
         throw error;
       }
-      nextArgs = { ...error.next, signal: args.signal };
+      nextArgs = { ...error.next, signal: args.signal, onAssistantMessageCommitted: args.onAssistantMessageCommitted };
     }
   }
 }

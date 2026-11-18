@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import type { AppReplyNotification } from '../../stores/spaceStoreTypes';
 import type { World } from '../../types/domain';
 import { Icon } from '../Icon';
@@ -17,7 +18,7 @@ export function AppReplyNotificationStack({
 }: AppReplyNotificationStackProps) {
   if (notifications.length === 0) return null;
 
-  return (
+  const content = (
     <div className="app-reply-notification-stack" aria-live="polite">
       {notifications.map((notification) => (
         <article className="app-reply-notification" key={notification.id}>
@@ -28,6 +29,9 @@ export function AppReplyNotificationStack({
           >
             <span className="app-reply-notification-title">{notification.collaboratorName}</span>
             <span className="app-reply-notification-preview">{notification.preview}</span>
+            {notification.nativeDeliveryStatus === 'denied' || notification.nativeDeliveryStatus === 'failed' ? (
+              <small>{notification.nativeDeliveryStatus === 'denied' ? '系统通知权限未开启，回复已保留' : '系统通知未送出，回复已保留'}</small>
+            ) : null}
           </button>
           <button
             type="button"
@@ -41,4 +45,5 @@ export function AppReplyNotificationStack({
       ))}
     </div>
   );
+  return typeof document === 'undefined' ? content : createPortal(content, document.body);
 }

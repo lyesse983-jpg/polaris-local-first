@@ -146,7 +146,44 @@ function buildExecutedStartTaskOutcome(action: Extract<ToolActionRunOutcome['act
 }
 
 describe('requestReply task activation', () => {
+  it('announces a saved real reply before tool follow-ups complete, and retains it if later work is aborted', async () => {
+    vi.stubGlobal('window', {setTimeout, clearTimeout, requestAnimationFrame: (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0), cancelAnimationFrame: clearTimeout});
+    requestCollaboratorReplyMock.mockReset();
+    requestCollaboratorReplyMock.mockResolvedValueOnce({ content: 'Saved real prose.\n\n```polaris-tools {"actions":[{"kind":"updateProactiveMessageRule","ruleId":"trigger-1","scheduleKind":"once","afterMinutes":3}]}```', finishReason: 'stop' });
+    const user: ChatMessage = {id: 'user-save', role: 'user', content: 'synthetic', timestamp: 1};
+    let messages = [user]; let durable: ChatMessage[] = [];
+    const committed = vi.fn((id: string) => { expect(durable.find(message => message.id === id)?.content).toContain('Saved real prose.'); });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {release = resolve;});
+    let toolStarted = false;
+    const controller = new AbortController();
+    const base = buildRequestSnapshot(null);
+    const pending = requestReply({signal: controller.signal, onAssistantMessageCommitted: committed,
+      ui: {abortControllerRef: {current: null}, setSending: vi.fn(), setStreaming: vi.fn(), streamingLifecycleReleaseRef: {current: null}},
+      chat: {
+        addMessage: (_target, message) => {messages = [...messages, message];},
+        findConversation: () => ({...buildWritableConversation(messages).conversation, messages}),
+        findConversationMessage: (_id, messageId) => messages.find(message => message.id === messageId),
+        getConversationMessages: () => messages, getConversationTask: () => null,
+        replaceConversationMessages: (_target, next) => {messages = next;},
+        setConversationTask: vi.fn(), appendRuntimeFeedbackEvent: vi.fn(), insertMessageBefore: vi.fn(),
+        updateMessage: (_target, id, patch) => {messages = messages.map(message => message.id === id ? {...message, ...patch} : message);},
+        persistToDb: async () => { durable = structuredClone(messages); }
+      }, executeToolActions: async () => {toolStarted = true; await gate; return [];},
+      conversationId: 'conversation-1', writableConversation: buildWritableConversation(messages), collaboratorId: 'pharos', messages,
+      requestSnapshot: {...base, enabledToolGroups: {...base.enabledToolGroups, proactive: true} as never}
+    });
+    try {
+      await vi.waitFor(() => expect(toolStarted).toBe(true));
+      expect(committed).toHaveBeenCalledOnce();
+      controller.abort(); release();
+      expect(await pending).toEqual({status: 'aborted'});
+      expect(messages.some(message => message.content.includes('Saved real prose.'))).toBe(true);
+    } finally {controller.abort(); release(); await pending; vi.unstubAllGlobals();}
+  });
+
   it('shows a waiting reply before slow MCP discovery and lets cancellation finish without waiting for the catalog', async () => {
+    resolveMcpToolCatalogMock.mockClear();
     vi.stubGlobal('window', {setTimeout, clearTimeout, requestAnimationFrame: (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0), cancelAnimationFrame: clearTimeout});
     let release!: (value: McpToolCatalogResolution) => void;
     const catalog = new Promise<McpToolCatalogResolution>((resolve) => { release = resolve; });

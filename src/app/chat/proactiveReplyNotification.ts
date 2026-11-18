@@ -13,6 +13,8 @@ type BuildProactiveReplyNotificationArgs = {
   collaboratorId: string;
   collaboratorName: string;
   messageCountBeforeReply: number;
+  messageIdsBeforeReply?: ReadonlySet<string>;
+  committedMessageId?: string;
   currentView: {
     activeWorld: World;
     activeConversationId: string | null;
@@ -31,12 +33,15 @@ export function buildProactiveReplyNotification({
   conversation,
   collaboratorId,
   collaboratorName,
-  messageCountBeforeReply
+  messageCountBeforeReply,
+  messageIdsBeforeReply,
+  committedMessageId
 }: BuildProactiveReplyNotificationArgs): ProactiveReplyNotificationDraft | null {
   if (!conversation) return null;
 
   const reply = conversation.messages
-    .slice(messageCountBeforeReply)
+    .filter((message, index) => (messageIdsBeforeReply ? !messageIdsBeforeReply.has(message.id) : index >= messageCountBeforeReply)
+      && (!committedMessageId || message.id === committedMessageId))
     .reverse()
     .find((message) => message.role === 'assistant' && !message.toolInvocation && buildReplyPreview(message.content));
   if (!reply) return null;
