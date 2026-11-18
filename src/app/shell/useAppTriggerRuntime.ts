@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { syncNativeHeartbeatAppointments } from '../../native/heartbeatWorker';
+import { useEffect, useMemo } from 'react';
 import { useChatDerived } from '../chat/chatDerivedState';
 import { createChatReplyRunner } from '../chat/chatReplyFlow';
 import { createChatToolActions } from '../chat/chatToolActions';
@@ -49,6 +50,9 @@ export function useAppTriggerRuntime({ chatRuntime, startupReady }: UseAppTrigge
     && store.persona.hydrated
     && store.runtime.hydrated
     && store.collection.hydrated;
+  useEffect(() => {
+    if (triggerRuntimeReady) void syncNativeHeartbeatAppointments(store.runtime.triggerRules).catch(() => chatRuntime.setCommandStatus('后台预约同步失败，前台心跳仍可使用。', true));
+  }, [triggerRuntimeReady, store.runtime.triggerRules]);
   const liveConversations = selectChatConversations(store.chat.conversations);
 
   const derived = useChatDerived({

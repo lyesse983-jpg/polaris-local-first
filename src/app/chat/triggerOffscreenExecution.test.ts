@@ -9,6 +9,7 @@ vi.mock('react', () => ({
   useEffect: (effect: () => void | (() => void)) => hooks.effects.push(effect)
 }));
 vi.mock('@capacitor/core', () => ({ Capacitor: {isNativePlatform: () => false} }));
+vi.mock('../../native/heartbeatWorker', () => ({ installNativeHeartbeatRuntime: () => () => undefined, shouldDeferToNativeHeartbeatWorker: () => false }));
 vi.mock('../../native/localTriggerNotifications', () => ({ postNativeProactiveReplyNotification: vi.fn(async () => 'synced') }));
 import { useChatTriggerRuntime } from './useChatTriggerRuntime';
 
@@ -51,7 +52,7 @@ it.each([false, true])('runs outside the target view, or defers without a persis
     } as never
   });
   const cleanups = hooks.effects.map(effect => effect());
-  for (let i = 0; i < 25; i++) await Promise.resolve();
+  for (let i = 0; i < 50; i++) await Promise.resolve();
   if (busy) {
     expect(runReply).not.toHaveBeenCalled();
     expect(persistChat).not.toHaveBeenCalled(); expect(persistRuntime).not.toHaveBeenCalled();

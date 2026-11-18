@@ -1014,3 +1014,8 @@
     flex: 1 1 88px;
   }
 }
+
+.heartbeat-worker-panel { display: grid; gap: 10px; }
+.heartbeat-worker-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.heartbeat-worker-actions button { border: 1px solid var(--border-color, rgba(127,127,127,.25)); border-radius: 12px; padding: 10px 14px; font: inherit; color: inherit; background: var(--card-bg, rgba(127,127,127,.08)); }
+.heartbeat-worker-actions button:disabled { opacity: .5; }

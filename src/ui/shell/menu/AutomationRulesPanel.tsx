@@ -1,3 +1,4 @@
+import { HeartbeatWorkerPanel } from './HeartbeatWorkerPanel';
 import { useEffect, useMemo, useState } from 'react';
 import type { I18nTranslator } from '../../../i18n/translator';
 import { useI18n } from '../../../i18n/useI18n';
@@ -291,6 +292,7 @@ export function AutomationRulesPanel({
 
   return (
     <div className={`automation-rules-panel ${lockedCollaboratorId ? 'automation-rules-panel--collaborator' : 'automation-rules-panel--menu'}`}>
+      <HeartbeatWorkerPanel />
       <section className="menu-section automation-form-section automation-rules-head-section">
         <div className="menu-section-head">
           <span className="menu-section-kicker">{t('settings.automation.rulesSection')}</span>

@@ -46,6 +46,8 @@ jobs:
           src/app/chat/chatReplyFlow.test.ts
           src/app/chat/chatStreamingSession.test.ts
           src/app/chat/triggerOffscreenExecution.test.ts
+          src/app/chat/heartbeatExecutor.test.ts
+          src/native/heartbeatWorker.test.ts
           src/app/chat/proactiveReplyNotification.test.ts
           src/app/chat/proactiveReplyPublisher.test.ts
           src/app/chat/silentTriggerChatPort.test.ts
