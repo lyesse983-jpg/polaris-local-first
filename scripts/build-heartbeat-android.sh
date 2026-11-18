@@ -32,6 +32,8 @@ cat > "$debug_strings_path" <<'XML'
 XML
 trap 'rm -f "$debug_strings_path"' EXIT
 
+node tools/generate-heartbeat-icons.mjs
+
 bash android/gradlew -p android assembleDebug --no-daemon --stacktrace
 
 apk_path="android/app/build/outputs/apk/debug/app-debug.apk"

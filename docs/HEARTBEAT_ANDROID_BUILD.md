@@ -187,3 +187,8 @@ Android instrumentation 回归使用合成的数 MB 中文与 emoji JSON，确�
 依据：[WorkManager 的前台执行支持](https://developer.android.com/develop/background-work/background-tasks/persistent/how-to/long-running)。Android 16 及以上仍有任务额度限制，不能承诺精确到秒或永不被系统停止。
 
 首轮安卓回归发现：精确闹钟服务已持有会话时，迟到的兜底 Worker 仍可能短暂取得另一份前台保护，然后返回 already-running 并把共享窗口状态写成 finished。已增加活跃会话短路及窗口状态所有者，保护窗口接管后，旧窗口结束不会覆盖当前状态；停止动作回归保持启用，未跳过失败检查。
+
+
+### 测试版图标区分
+
+心跳测试构建生成独立的 debug 启动图标覆盖层，背景为精确 `#C4D8E5`（RGB 196,216,229），保留罗盘标识并增加深色线条对比。覆盖标准/圆形自适应图标及五种像素密度的旧式图标。生成源和脚本随仓库保存，release 资源不变，包名与签名仍沿用原心跳测试版，可覆盖安装。
