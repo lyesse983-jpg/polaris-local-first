@@ -42,8 +42,8 @@ export function HeartbeatWorkerStatusView({status, busy, error, en, onRefresh, o
   return <section className="menu-section heartbeat-worker-panel">
     <strong>{en ? 'Background execution experiment' : '后台执行实验'}</strong>
     <p className="menu-section-note">{en
-      ? 'After opening Polaris, Android can wake its existing runtime while you use another app or lock the screen. Timing may be delayed. Cold starts after the process is killed are not supported yet.'
-      : '打开过 Polaris 后，允许安卓在切换应用或锁屏时唤醒现有运行环境。可能延后执行；暂不支持进程结束后的独立启动。'}</p>
+      ? 'With exact-alarm access, an appointment can open a short foreground execution window. A running notification appears only during model/tool work. Timing may be delayed; an existing app runtime is still required.'
+      : '开启精确闹钟后，预约到点时尝试启动短时保护窗口；模型和工具执行期间会显示运行通知，完成后退出。系统可能延后执行；仍需现有应用运行环境。'}</p>
     <div className="heartbeat-worker-actions">
       <button type="button" role="switch" aria-checked={status?.enabled ?? false} disabled={!status || busy}
         onClick={onToggle}>
@@ -56,6 +56,13 @@ export function HeartbeatWorkerStatusView({status, busy, error, en, onRefresh, o
       {status.connectionIssue ? <p>{en ? 'Connection setup failed; refresh to retry.' : '入口注册失败，可刷新状态重试。'}</p> : null}
       <p>{en ? 'Last Android task: ' : '上次安卓任务：'}{outcomes[status.lastOutcome] ?? (en ? 'Unknown status' : '状态未知')}
         {status.lastFinishedAt > 0 ? ` · ${new Date(status.lastFinishedAt).toLocaleTimeString(en ? 'en-US' : 'zh-CN', {hour: '2-digit', minute: '2-digit'})}` : ''}</p>
+      {status.lastSource && status.lastSource !== 'none' ? <p>{en ? 'Execution path: ' : '执行通道：'}{status.lastSource === 'foreground-service' ? (en ? 'protected execution window' : '短时保护运行') : (en ? 'regular background task' : '普通后台任务')}</p> : null}
+      {typeof status.lastStartedInForeground === 'boolean' && typeof status.lastFinishedInForeground === 'boolean' ? <p>
+        {en ? 'App visibility: ' : '运行界面：'}{status.lastStartedInForeground ? (en ? 'foreground' : '前台') : (en ? 'background' : '后台')} → {status.lastFinishedInForeground ? (en ? 'foreground' : '前台') : (en ? 'background' : '后台')}
+      </p> : null}
+      {(status.lastReplySavedAt ?? 0) > 0 ? <p>{en ? 'Reply saved: ' : '正文保存：'}{new Date(status.lastReplySavedAt!).toLocaleTimeString(en ? 'en-US' : 'zh-CN')} · {status.lastReplySavedInForeground ? (en ? 'foreground' : '前台') : (en ? 'background' : '后台')}</p> : null}
+      {status.lastNotificationStatus && status.lastNotificationStatus !== 'none' ? <p>{en ? 'System notification: ' : '系统通知：'}{status.lastNotificationStatus === 'synced' ? (en ? 'submitted to Android' : '已交给安卓系统') : status.lastNotificationStatus === 'denied' ? (en ? 'permission not granted' : '通知权限未开启') : (en ? 'not submitted' : '未能交给系统')}</p> : null}
+      {status.lastWindowStatus && status.lastWindowStatus !== 'none' ? <p>{en ? 'Latest execution window: ' : '最近保护窗口：'}{status.lastWindowStatus === 'running' ? (en ? 'running' : '运行中') : status.lastWindowStatus === 'finished' ? (en ? 'ended' : '已结束') : (en ? 'Android did not allow startup' : '系统未允许启动')}</p> : null}
       {status.lastOutcome === 'runtime-unavailable' ? <p>{en ? 'Recorded cause: ' : '当次诊断：'}{({
         'process-restarted': en ? 'The process changed since its last registration' : '相较上次注册，应用进程已重建',
         'registration-lost': en ? 'Registration was lost in the same process' : '同一进程内的入口注册已丢失',

@@ -57,7 +57,7 @@ export function createHeartbeatExecutor(getContext: () => HeartbeatExecutionCont
       const userId = latest?.messages.filter(item => item.role === 'user').slice(-1)[0]?.id ?? null;
       if (!latest || userId !== active.userId || !store.runtime.readLatestState().triggerRules.some(item => item.id === active!.ruleId)) active.controller.abort();
     },
-    execute: async (request: { ruleId?: string; scheduledFor?: number; signal?: AbortSignal } = {}): Promise<HeartbeatExecutionResult> => {
+    execute: async (request: { ruleId?: string; scheduledFor?: number; signal?: AbortSignal; onReplySaved?: () => void; onNotification?: (delivery: string) => void } = {}): Promise<HeartbeatExecutionResult> => {
       if (disposed || request.signal?.aborted) return 'aborted';
       if (running) return 'busy';
       const {store, runReply, setCommandStatus} = getContext();
@@ -108,11 +108,14 @@ export function createHeartbeatExecutor(getContext: () => HeartbeatExecutionCont
           getConversation: () => store.chat.readLatestState().conversations.find(item => item.id === conversation.id) ?? null,
           getNotifications: () => store.space.readLatestState().replyNotifications ?? [],
           enqueue: notification => { if (!disposed) store.space.enqueueReplyNotification(notification); },
-          postNative: postNativeProactiveReplyNotification
+          postNative: async notification => {
+            const delivery = await postNativeProactiveReplyNotification(notification);
+            request.onNotification?.(delivery); return delivery;
+          }
         });
         const result = await runReply({conversationId: current.conversationId, collaboratorId: rule.target.collaboratorId,
           messages, silent: rule.action.delivery === 'silent', signal: controller.signal,
-          onAssistantMessageCommitted: publisher ? id => { if (!disposed) publisher.publish(id); } : undefined});
+          onAssistantMessageCommitted: publisher ? id => { if (!disposed) { request.onReplySaved?.(); publisher.publish(id); } } : undefined});
         outcome = result.status;
         if (outcome === 'failed') store.runtime.markTriggerFailed(rule.id, '本次心跳运行失败，已保留工具证据。');
         // Native worker acknowledgement comes after both storage and notification delivery settle.

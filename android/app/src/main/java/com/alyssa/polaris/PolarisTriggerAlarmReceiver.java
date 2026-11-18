@@ -16,7 +16,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-/** Receives an exact alarm and shows a notification. Model execution resumes only inside Polaris. */
+/** Validates an exact user appointment, opens a bounded execution window, and shows its reminder. */
 public class PolarisTriggerAlarmReceiver extends BroadcastReceiver {
     private static final String CHANNEL_ID = "polaris-triggers";
 
@@ -42,6 +42,7 @@ public class PolarisTriggerAlarmReceiver extends BroadcastReceiver {
                     }
                 }
                 if (record == null || scheduledFor > System.currentTimeMillis() + 1_000) return;
+                HeartbeatForegroundService.startFromAlarm(context, ruleId, scheduledFor);
                 NotificationManager manager = context.getSystemService(NotificationManager.class);
                 if (manager == null || !manager.areNotificationsEnabled()) return;
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU

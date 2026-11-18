@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 const mock = vi.hoisted(() => ({
   failListener: false, native: true, callbacks: {} as Record<string, (event: any) => void>,
-  sync: vi.fn(async () => undefined), finish: vi.fn(async () => undefined), ready: vi.fn(async () => undefined),
+  progress: vi.fn(async () => undefined), sync: vi.fn(async () => undefined), finish: vi.fn(async () => undefined), ready: vi.fn(async () => undefined),
   status: vi.fn(async () => ({enabled: true, runtimeReady: true, lastOutcome: 'never', lastStartedAt: 0, lastFinishedAt: 0})),
   remove: vi.fn(async () => undefined)
 }));
 vi.mock('@capacitor/core', () => ({
   Capacitor: {isNativePlatform: () => mock.native, getPlatform: () => 'android', isPluginAvailable: () => mock.native},
-  registerPlugin: () => ({sync: mock.sync, finish: mock.finish, runtimeReady: mock.ready, status: mock.status,
+  registerPlugin: () => ({progress: mock.progress, sync: mock.sync, finish: mock.finish, runtimeReady: mock.ready, status: mock.status,
     setEnabled: vi.fn(async () => ({enabled: true})),
     addListener: vi.fn(async (name, callback) => {if (mock.failListener) {mock.failListener = false; throw new Error('synthetic listener failure');} mock.callbacks[name] = callback; return {remove: mock.remove};})})
 }));
@@ -18,6 +18,17 @@ afterEach(() => {vi.clearAllMocks(); vi.unstubAllGlobals(); mock.callbacks = {};
 });
 
 describe('Android worker to shared runtime bridge', () => {
+  it('reports committed prose and notification handoff before completion without copying message content', async () => {
+    const execute = vi.fn(async (request) => { request.onReplySaved(); request.onNotification('denied'); return 'completed' as const; });
+    const cleanup = installNativeHeartbeatRuntime(execute);
+    await vi.waitFor(() => expect(mock.ready).toHaveBeenCalledWith(expect.objectContaining({ready: true})));
+    mock.callbacks.wake({sessionId: 'synthetic-progress', ruleId: 'synthetic-rule', scheduledFor: Date.now() - 1});
+    await vi.waitFor(() => expect(mock.finish).toHaveBeenCalledWith({sessionId: 'synthetic-progress', outcome: 'completed'}));
+    expect(mock.progress).toHaveBeenNthCalledWith(1, {sessionId: 'synthetic-progress', phase: 'reply-saved'});
+    expect(mock.progress).toHaveBeenNthCalledWith(2, {sessionId: 'synthetic-progress', phase: 'reply-notification', delivery: 'denied'});
+    expect(mock.progress.mock.invocationCallOrder[1]).toBeLessThan(mock.finish.mock.invocationCallOrder[0]); cleanup();
+  });
+
   it('reconnects a lost live registration without rewriting the historical failure or starting a model', async () => {
     const execute = vi.fn(); const cleanup = installNativeHeartbeatRuntime(execute);
     await vi.waitFor(() => expect(mock.ready).toHaveBeenCalledWith(expect.objectContaining({ready: true})));

@@ -9,12 +9,17 @@ export type HeartbeatWorkerStatus = {
   enabled: boolean; runtimeReady: boolean; lastOutcome: string;
   lastStartedAt: number; lastFinishedAt: number;
   lastMissingReason?: string; connectionIssue?: boolean;
+  lastSource?: string; lastStartedInForeground?: boolean; lastFinishedInForeground?: boolean;
+  lastReplySavedAt?: number; lastReplySavedInForeground?: boolean;
+  lastNotificationAt?: number; lastNotificationStatus?: string;
+  lastWindowStatus?: string;
 };
 type WorkerPlugin = {
   sync(options: {appointments: {ruleId: string; scheduledFor: number}[]}): Promise<void>;
   setEnabled(options: {enabled: boolean}): Promise<HeartbeatWorkerStatus>;
   status(): Promise<HeartbeatWorkerStatus>;
   runtimeReady(options: {owner: string; ready: boolean}): Promise<void>;
+  progress(options: {sessionId: string; phase: 'reply-saved' | 'reply-notification'; delivery?: string}): Promise<void>;
   finish(options: {sessionId: string; outcome: HeartbeatExecutionResult}): Promise<void>;
   addListener(event: 'wake' | 'stop', callback: (event: Wake) => void): Promise<PluginListenerHandle>;
 };
@@ -46,7 +51,7 @@ export async function setHeartbeatWorkerEnabled(enabled: boolean) {
   const status = await Worker.setEnabled({enabled});
   return await readHeartbeatWorkerStatus() ?? status;
 }
-export function installNativeHeartbeatRuntime(execute: (request: {ruleId: string; scheduledFor: number; signal: AbortSignal}) => Promise<HeartbeatExecutionResult>) {
+export function installNativeHeartbeatRuntime(execute: (request: {ruleId: string; scheduledFor: number; signal: AbortSignal; onReplySaved?: () => void; onNotification?: (delivery: string) => void}) => Promise<HeartbeatExecutionResult>) {
   if (!canUseHeartbeatWorker()) return () => undefined;
   const owner = createUid('heartbeat-host');
   const sessions = new Map<string, AbortController>();
@@ -64,8 +69,14 @@ export function installNativeHeartbeatRuntime(execute: (request: {ruleId: string
             if (cancelled || typeof event.sessionId !== 'string' || !event.sessionId || typeof event.ruleId !== 'string'
               || !event.ruleId || !Number.isFinite(event.scheduledFor) || event.scheduledFor <= 0 || sessions.has(event.sessionId)) return;
             const controller = new AbortController(); sessions.set(event.sessionId, controller);
-            void execute({ruleId: event.ruleId, scheduledFor: event.scheduledFor, signal: controller.signal})
+            const progressCalls: Promise<void>[] = [];
+            const progress = (phase: 'reply-saved' | 'reply-notification', delivery?: string) => {
+              progressCalls.push(Worker.progress({sessionId: event.sessionId, phase, ...(delivery ? {delivery} : {})}).catch(() => undefined));
+            };
+            void execute({ruleId: event.ruleId, scheduledFor: event.scheduledFor, signal: controller.signal,
+              onReplySaved: () => progress('reply-saved'), onNotification: delivery => progress('reply-notification', delivery)})
               .catch(() => 'failed' as const).then(async outcome => {
+                await Promise.all(progressCalls);
                 sessions.delete(event.sessionId);
                 try { await Worker.finish({sessionId: event.sessionId, outcome}); } catch { /* Native timeout retains its own diagnosis. */ }
               });

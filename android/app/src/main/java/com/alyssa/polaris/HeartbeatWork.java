@@ -19,7 +19,11 @@ final class HeartbeatWork {
     static final String TAG = "polaris-heartbeat-worker";
     static final Object LOCK = new Object();
     static final Handler MAIN = new Handler(Looper.getMainLooper());
-    interface Host { void dispatch(String event, String sessionId, String ruleId, long at); }
+    interface Host {
+        void dispatch(String event, String sessionId, String ruleId, long at);
+        default void prepare() {}
+        default boolean isForeground() { return false; }
+    }
     static WeakReference<Host> host = new WeakReference<>(null);
     static String owner = "";
     static final Map<String, Session> sessions = new HashMap<>();
@@ -28,6 +32,7 @@ final class HeartbeatWork {
         final String ruleId;
         final long at;
         final Host target;
+        final long deadline = android.os.SystemClock.elapsedRealtime() + 315_000;
         final CompletableFuture<String> result = new CompletableFuture<>();
         Session(String ruleId, long at, Host target) { this.ruleId = ruleId; this.at = at; this.target = target; }
     }
@@ -96,6 +101,7 @@ final class HeartbeatWork {
             if (!enabled) {
                 for (Session session : sessions.values()) stop(session);
                 WorkManager.getInstance(c).cancelAllWorkByTag(TAG);
+                c.stopService(new android.content.Intent(c, HeartbeatForegroundService.class));
             } else sync(c, appointments(c));
         }
     }

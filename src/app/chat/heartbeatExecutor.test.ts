@@ -34,6 +34,13 @@ function setup() {
 }
 
 describe('shared heartbeat execution without React', () => {
+  it('reports committed reply and notification delivery for the owning native session', async () => {
+    const s = setup(); const onReplySaved = vi.fn(); const onNotification = vi.fn();
+    expect(await s.executor.execute({...s.appointment, onReplySaved, onNotification})).toBe('completed');
+    expect(onReplySaved).toHaveBeenCalledOnce(); expect(onNotification).toHaveBeenCalledExactlyOnceWith('synced');
+    expect(s.conversation.messages.find(message => message.id === 'reply')?.content).toBe('Synthetic saved prose');
+  });
+
   it('allows only one foreground/native claimant and acknowledges after final storage completes', async () => {
     const s = setup(); let finishSave!: () => void;
     s.persist.mockImplementationOnce(async () => undefined).mockImplementationOnce(() => new Promise<void>(done => {finishSave = done;}));
