@@ -19,6 +19,19 @@ function setup(postNative = vi.fn(async () => 'synced' as const)) {
 }
 
 describe('committed heartbeat reply delivery', () => {
+  it('waits for real prose when a committed message contains only projected execution code', async () => {
+    const s = setup();
+    s.conversation.messages.push({id: 'code', role: 'assistant', content: '```js\nawait runSyntheticTool();\n```', timestamp: 3});
+    s.publisher.publish('code'); await s.publisher.deliverySettled();
+    expect(s.notices()).toEqual([]);
+    expect(s.postNative).not.toHaveBeenCalled();
+    s.conversation.messages.push({id: 'prose', role: 'assistant', content: '这次有正文了。\n```js\nawait runSyntheticTool();\n```', timestamp: 4});
+    s.publisher.publish('prose'); await s.publisher.deliverySettled();
+    expect(s.postNative).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({preview: '这次有正文了。'}));
+    expect(s.conversation.messages[1].content).toBe('wake');
+    expect(s.conversation.messages[2].content).toContain('runSyntheticTool');
+  });
+
   it('notifies committed prose before tool follow-ups finish, once per run, and keeps the app preview current', async () => {
     const s = setup();
     s.conversation.messages.push({id: 'reply1', role: 'assistant', content: 'A real saved reply', timestamp: 3});
