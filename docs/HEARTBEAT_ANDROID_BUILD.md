@@ -170,3 +170,5 @@ Android instrumentation 回归使用合成的数 MB 中文与 emoji JSON，确�
 设备验证：保持通知、精确闹钟和后台实验开启，安排约五分钟后的主动聊天预约，离开 Polaris 并锁屏。执行期间应尝试出现短暂运行通知，完成后另发真实正文。回到规则页核对执行通道及“运行界面：后台→后台”、正文保存当时的界面状态；若为“后台→前台”或保护窗口被系统拒绝，不能判定锁屏链路已通过。安静规则当前仍走原 WorkManager 路径，尚不具备该精确闹钟前台窗口。
 
 依据：[dataSync 服务类型](https://developer.android.com/develop/background-work/services/fgs/service-types#data-sync)、[后台启动前台服务的限制和精确闹钟例外](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start)、[前台服务超时](https://developer.android.com/develop/background-work/services/fgs/timeout)。
+
+保护窗口可接管已启动的同一原生任务；该接管完成后，系统取消兜底 Worker 不会误取消前台服务持有的执行。新增合成原生回归验证这项所有权转移及最终完成回执。

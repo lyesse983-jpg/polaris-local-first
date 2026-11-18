@@ -7,10 +7,11 @@ import java.util.concurrent.TimeUnit;
 /** One native lease, shared by exact-alarm foreground windows and WorkManager fallback. */
 final class HeartbeatSessionRunner {
     private volatile HeartbeatWork.Session active;
+    private volatile boolean cancelled;
     String run(Context context, String ruleId, long at, String source) {
         HeartbeatWork.Session session;
-        boolean owner = false;
         synchronized (HeartbeatWork.LOCK) {
+            if (cancelled) return "aborted";
             if (ruleId == null || at > System.currentTimeMillis() || !HeartbeatWork.prefs(context).getBoolean("enabled", false)) return "stale";
             session = null;
             for (HeartbeatWork.Session current : HeartbeatWork.sessions.values()) {
@@ -25,13 +26,21 @@ final class HeartbeatSessionRunner {
                 HeartbeatWork.Host host = HeartbeatWork.host.get();
                 if (host == null) { HeartbeatWork.recordMissingRuntime(context); return "runtime-unavailable"; }
                 session = new HeartbeatWork.Session(ruleId, at, host);
-                HeartbeatWork.sessions.put(session.id, session); owner = true;
+                HeartbeatWork.sessions.put(session.id, session); session.ownerRunner = this;
                 HeartbeatWork.prefs(context).edit().putBoolean("lastStartedInForeground", host.isForeground()).commit();
                 HeartbeatWork.record(context, "running", true);
+            }
+            if (session.ownerRunner != this) {
+                if (session.result.isDone()) return "already-running";
+                if (!"foreground-service".equals(source)) return "already-running";
+                // The protected window takes the lease; stopping a fallback Worker cannot cancel it.
+                session.ownerRunner = this;
+                HeartbeatWork.prefs(context).edit().putString("lastSource", source).commit();
             }
             active = session;
         }
         HeartbeatWork.Session current = session;
+        if (cancelled) cancel();
         HeartbeatWork.MAIN.post(() -> {
             if (!current.result.isDone()) {
                 try { current.target.prepare(); HeartbeatWork.deliver(current, "wake"); }
@@ -40,16 +49,24 @@ final class HeartbeatSessionRunner {
         });
         String outcome;
         try { outcome = current.result.get(Math.max(1, current.deadline - SystemClock.elapsedRealtime()), TimeUnit.MILLISECONDS); }
-        catch (InterruptedException stopped) { HeartbeatWork.stop(current); Thread.currentThread().interrupt(); outcome = "aborted"; }
-        catch (Exception timeout) { HeartbeatWork.stop(current); outcome = "timeout"; }
-        if (owner) {
-            synchronized (HeartbeatWork.LOCK) { HeartbeatWork.sessions.remove(current.id); }
-            if ("runtime-unavailable".equals(outcome)) HeartbeatWork.prefs(context).edit().putString("lastMissingReason", "dispatch-failed").commit();
-            HeartbeatWork.prefs(context).edit().putBoolean("lastFinishedInForeground", current.target.isForeground()).commit();
-            HeartbeatWork.record(context, outcome, false);
+        catch (InterruptedException stopped) { cancel(); Thread.currentThread().interrupt(); outcome = "aborted"; }
+        catch (Exception timeout) { cancel(); outcome = "timeout"; }
+        synchronized (HeartbeatWork.LOCK) {
+            if (current.ownerRunner == this) {
+                HeartbeatWork.sessions.remove(current.id);
+                if ("runtime-unavailable".equals(outcome)) HeartbeatWork.prefs(context).edit().putString("lastMissingReason", "dispatch-failed").commit();
+                HeartbeatWork.prefs(context).edit().putBoolean("lastFinishedInForeground", current.target.isForeground()).commit();
+                HeartbeatWork.record(context, outcome, false);
+            }
         }
         active = null;
         return outcome;
     }
-    void cancel() { HeartbeatWork.Session session = active; if (session != null && !session.result.isDone()) HeartbeatWork.stop(session); }
+    void cancel() {
+        cancelled = true;
+        HeartbeatWork.Session session = active;
+        synchronized (HeartbeatWork.LOCK) {
+            if (session != null && session.ownerRunner == this && !session.result.isDone()) HeartbeatWork.stop(session);
+        }
+    }
 }

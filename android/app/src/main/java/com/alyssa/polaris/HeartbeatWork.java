@@ -32,6 +32,7 @@ final class HeartbeatWork {
         final String ruleId;
         final long at;
         final Host target;
+        HeartbeatSessionRunner ownerRunner;
         final long deadline = android.os.SystemClock.elapsedRealtime() + 315_000;
         final CompletableFuture<String> result = new CompletableFuture<>();
         Session(String ruleId, long at, Host target) { this.ruleId = ruleId; this.at = at; this.target = target; }

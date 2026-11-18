@@ -123,6 +123,29 @@ public class HeartbeatWorkerTest {
         while (stops.get() == 0 && SystemClock.elapsedRealtime() < end) SystemClock.sleep(20);
         assertTrue(stops.get() > 0); assertFalse(HeartbeatWork.prefs(context).getBoolean("enabled", true));
     }
+    @Test public void protectedLeaseSurvivesFallbackWorkerCancellation() throws Exception {
+        long at = System.currentTimeMillis() - 1;
+        JSONArray items = new JSONArray().put(new JSONObject().put("ruleId", "synthetic-lease-transfer").put("scheduledFor", at));
+        HeartbeatWork.prefs(context).edit().putBoolean("enabled", true).putString("appointments", items.toString()).commit();
+        HeartbeatWork.Host host = (event, id, ruleId, time) -> { };
+        HeartbeatWork.bind("synthetic-transfer-host", host, true);
+        HeartbeatSessionRunner fallback = new HeartbeatSessionRunner(), protectedRun = new HeartbeatSessionRunner();
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            java.util.concurrent.Future<String> first = pool.submit(() -> fallback.run(context, "synthetic-lease-transfer", at, "work-manager"));
+            awaitOutcome("running");
+            java.util.concurrent.Future<String> second = pool.submit(() -> protectedRun.run(context, "synthetic-lease-transfer", at, "foreground-service"));
+            long until = SystemClock.elapsedRealtime() + 5_000;
+            while (!"foreground-service".equals(HeartbeatWork.prefs(context).getString("lastSource", "")) && SystemClock.elapsedRealtime() < until) SystemClock.sleep(20);
+            assertEquals("foreground-service", HeartbeatWork.prefs(context).getString("lastSource", ""));
+            fallback.cancel();
+            HeartbeatWork.Session session;
+            synchronized (HeartbeatWork.LOCK) { session = HeartbeatWork.sessions.values().iterator().next(); assertFalse(session.result.isDone()); }
+            HeartbeatWork.finish(host, session.id, "completed");
+            assertEquals("completed", first.get(5, TimeUnit.SECONDS)); assertEquals("completed", second.get(5, TimeUnit.SECONDS));
+            assertEquals("completed", HeartbeatWork.prefs(context).getString("lastOutcome", ""));
+        } finally { protectedRun.cancel(); pool.shutdownNow(); HeartbeatWork.detach(host); }
+    }
     @Test public void changedAppointmentCancelsUnstartedNativeWork() throws Exception {
         long at = System.currentTimeMillis() + 60_000;
         schedule("synthetic-cancel", at);
