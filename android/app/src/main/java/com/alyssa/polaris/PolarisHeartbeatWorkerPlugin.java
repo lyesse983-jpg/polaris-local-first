@@ -11,8 +11,8 @@ public class PolarisHeartbeatWorkerPlugin extends Plugin implements HeartbeatWor
         JSObject status = new JSObject();
         status.put("enabled", HeartbeatWork.prefs(getContext()).getBoolean("enabled", false));
         synchronized (HeartbeatWork.LOCK) { status.put("runtimeReady", HeartbeatWork.host.get() == this && hasListeners("wake") && hasListeners("stop")); }
-        for (String field : new String[]{"lastSource", "lastWindowStatus", "lastNotificationStatus"}) status.put(field, HeartbeatWork.prefs(getContext()).getString(field, "none"));
-        for (String field : new String[]{"lastWindowStartedAt", "lastWindowFinishedAt", "lastReplySavedAt", "lastNotificationAt"}) status.put(field, HeartbeatWork.prefs(getContext()).getLong(field, 0));
+        for (String field : new String[]{"lastSource", "lastWindowStatus", "lastNotificationStatus", "lastStopReason"}) status.put(field, HeartbeatWork.prefs(getContext()).getString(field, "none"));
+        for (String field : new String[]{"lastWindowStartedAt", "lastWindowFinishedAt", "lastReplySavedAt", "lastNotificationAt", "lastScheduledFor"}) status.put(field, HeartbeatWork.prefs(getContext()).getLong(field, 0));
         for (String field : new String[]{"lastStartedInForeground", "lastFinishedInForeground"}) {
             if (HeartbeatWork.prefs(getContext()).contains(field)) status.put(field, HeartbeatWork.prefs(getContext()).getBoolean(field, true));
         }
@@ -26,6 +26,7 @@ public class PolarisHeartbeatWorkerPlugin extends Plugin implements HeartbeatWor
         }
         status.put("lastReplySavedAt", HeartbeatWork.prefs(getContext()).getLong("lastReplySavedAt", 0));
         status.put("lastNotificationAt", HeartbeatWork.prefs(getContext()).getLong("lastNotificationAt", 0));
+        status.put("lastWorkerStopReason", HeartbeatWork.prefs(getContext()).getInt("lastWorkerStopReason", -256));
         return status;
     }
     @PluginMethod public void status(PluginCall call) { call.resolve(snapshot()); }

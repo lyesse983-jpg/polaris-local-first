@@ -56,7 +56,16 @@ export function HeartbeatWorkerStatusView({status, busy, error, en, onRefresh, o
       {status.connectionIssue ? <p>{en ? 'Connection setup failed; refresh to retry.' : '入口注册失败，可刷新状态重试。'}</p> : null}
       <p>{en ? 'Last Android task: ' : '上次安卓任务：'}{outcomes[status.lastOutcome] ?? (en ? 'Unknown status' : '状态未知')}
         {status.lastFinishedAt > 0 ? ` · ${new Date(status.lastFinishedAt).toLocaleTimeString(en ? 'en-US' : 'zh-CN', {hour: '2-digit', minute: '2-digit'})}` : ''}</p>
-      {status.lastSource && status.lastSource !== 'none' ? <p>{en ? 'Execution path: ' : '执行通道：'}{status.lastSource === 'foreground-service' ? (en ? 'protected execution window' : '短时保护运行') : (en ? 'regular background task' : '普通后台任务')}</p> : null}
+      {(status.lastScheduledFor ?? 0) > 0 ? <p>{en ? 'Appointment time: ' : '本次预约时间：'}{new Date(status.lastScheduledFor!).toLocaleString(en ? 'en-US' : 'zh-CN')}</p> : null}
+      {status.lastStopReason && status.lastStopReason !== 'none' ? <p>{en ? 'Stop source: ' : '中止来源：'}{({
+        'work-manager-stopped': en ? 'Android stopped the worker' : '安卓停止了任务',
+        'runtime-detached': en ? 'Runtime disconnected' : '运行入口断开',
+        'background-disabled': en ? 'Background experiment disabled' : '后台实验被关闭',
+        'native-cancelled': en ? 'Native execution cancelled' : '原生执行被取消'
+      } as Record<string, string>)[status.lastStopReason] ?? status.lastStopReason}
+      {status.lastStopReason === 'work-manager-stopped' ? ` (${status.lastWorkerStopReason ?? -256})` : ''}</p> : null}
+      {status.lastStopReason === 'work-manager-stopped' && typeof status.lastWorkerStopReason === 'number' ? <p>{en ? 'Android stop code: ' : '安卓中止代码：'}{status.lastWorkerStopReason}</p> : null}
+      {status.lastSource && status.lastSource !== 'none' ? <p>{en ? 'Execution path: ' : '执行通道：'}{['foreground-service', 'work-manager-foreground'].includes(status.lastSource) ? (en ? 'protected execution window' : '短时保护运行') : (en ? 'regular background task' : '普通后台任务')}</p> : null}
       {typeof status.lastStartedInForeground === 'boolean' && typeof status.lastFinishedInForeground === 'boolean' ? <p>
         {en ? 'App visibility: ' : '运行界面：'}{status.lastStartedInForeground ? (en ? 'foreground' : '前台') : (en ? 'background' : '后台')} → {status.lastFinishedInForeground ? (en ? 'foreground' : '前台') : (en ? 'background' : '后台')}
       </p> : null}

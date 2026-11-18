@@ -64,9 +64,36 @@ public class HeartbeatWorkerTest {
         HeartbeatWork.bind("synthetic-host", host, true);
         schedule("synthetic-shared-run", System.currentTimeMillis() - 1_000);
         awaitOutcome("completed"); assertEquals(1, calls.get());
+        assertEquals("work-manager-foreground", HeartbeatWork.prefs(context).getString("lastSource", ""));
         assertTrue(HeartbeatWork.prefs(context).getLong("lastStartedAt", 0) > 0);
         assertTrue(HeartbeatWork.prefs(context).getLong("lastFinishedAt", 0) > 0);
         assertFalse(HeartbeatWork.prefs(context).getAll().containsKey("apiKey"));
+    }
+    @Test public void editingFutureAppointmentRunsWithForegroundProtectionAndSurvivesClaimSync() throws Exception {
+        // Reproduces edit -> wait -> native delivery, with no manual play action.
+        long original = System.currentTimeMillis() + 120_000;
+        schedule("synthetic-edited-appointment", original);
+        long edited = System.currentTimeMillis() + 1_000;
+        AtomicInteger calls = new AtomicInteger();
+        CountDownLatch dispatched = new CountDownLatch(1);
+        String[] sessionId = new String[1];
+        HeartbeatWork.Host host = (event, id, ruleId, at) -> {
+            if (!"wake".equals(event)) return;
+            assertEquals(edited, at);
+            assertEquals("work-manager-foreground", HeartbeatWork.prefs(context).getString("lastSource", ""));
+            assertEquals("running", HeartbeatWork.prefs(context).getString("lastWindowStatus", ""));
+            calls.incrementAndGet(); sessionId[0] = id; dispatched.countDown();
+        };
+        HeartbeatWork.bind("synthetic-edited-host", host, true);
+        HeartbeatWork.sync(context, new JSONArray().put(new JSONObject().put("ruleId", "synthetic-edited-appointment").put("scheduledFor", edited)));
+        assertTrue(dispatched.await(20, TimeUnit.SECONDS));
+        // JS markTriggerFired removes the old appointment before the model finishes.
+        HeartbeatWork.sync(context, new JSONArray());
+        SystemClock.sleep(200);
+        synchronized (HeartbeatWork.LOCK) { assertFalse(HeartbeatWork.sessions.get(sessionId[0]).result.isDone()); }
+        HeartbeatWork.finish(host, sessionId[0], "completed"); awaitOutcome("completed");
+        assertEquals(1, calls.get());
+        assertEquals(edited, HeartbeatWork.prefs(context).getLong("lastScheduledFor", 0));
     }
     @Test public void missingRuntimeLeavesAppointmentForAppOpenInsteadOfInventingSuccess() throws Exception {
         long at = System.currentTimeMillis() - 1_000;

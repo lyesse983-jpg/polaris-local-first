@@ -32,10 +32,11 @@ final class HeartbeatWork {
         final String ruleId;
         final long at;
         final Host target;
+        final Context context;
         HeartbeatSessionRunner ownerRunner;
         final long deadline = android.os.SystemClock.elapsedRealtime() + 315_000;
         final CompletableFuture<String> result = new CompletableFuture<>();
-        Session(String ruleId, long at, Host target) { this.ruleId = ruleId; this.at = at; this.target = target; }
+        Session(Context context, String ruleId, long at, Host target) { this.context = context.getApplicationContext(); this.ruleId = ruleId; this.at = at; this.target = target; }
     }
     static SharedPreferences prefs(Context c) { return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE); }
     static String key(String ruleId, long at) {
@@ -100,7 +101,7 @@ final class HeartbeatWork {
         synchronized (LOCK) {
             if (!prefs(c).edit().putBoolean("enabled", enabled).commit()) throw new IllegalStateException("Setting save failed");
             if (!enabled) {
-                for (Session session : sessions.values()) stop(session);
+                for (Session session : sessions.values()) stop(session, "background-disabled");
                 WorkManager.getInstance(c).cancelAllWorkByTag(TAG);
                 c.stopService(new android.content.Intent(c, HeartbeatForegroundService.class));
             } else sync(c, appointments(c));
@@ -116,7 +117,7 @@ final class HeartbeatWork {
         synchronized (LOCK) {
             if (host.get() != target) return;
             host.clear(); owner = "";
-            for (Session session : sessions.values()) if (session.target == target) stop(session);
+            for (Session session : sessions.values()) if (session.target == target) stop(session, "runtime-detached");
         }
     }
     static void finish(Host target, String id, String outcome) {
@@ -129,9 +130,13 @@ final class HeartbeatWork {
         try { session.target.dispatch(event, session.id, session.ruleId, session.at); }
         catch (RuntimeException unavailable) { session.result.complete("runtime-unavailable"); }
     }
-    static void stop(Session session) {
-        MAIN.post(() -> deliver(session, "stop"));
-        session.result.complete("aborted");
+    static void stop(Session session, String reason) { stop(session, reason, -256); }
+    static void stop(Session session, String reason, int workerStopReason) {
+        // The first terminal cause wins; a late onStopped must not overwrite it.
+        if (session.result.complete("aborted")) {
+            prefs(session.context).edit().putString("lastStopReason", reason).putInt("lastWorkerStopReason", workerStopReason).commit();
+            MAIN.post(() -> deliver(session, "stop"));
+        }
     }
     static void noteRegistration(Context context) {
         prefs(context).edit().putString("lastBoundProcess", PROCESS_TOKEN).commit();

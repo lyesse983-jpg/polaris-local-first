@@ -22,10 +22,11 @@ final class HeartbeatSessionRunner {
                 if (!HeartbeatWork.sessions.isEmpty()) return "busy";
                 HeartbeatWork.prefs(context).edit().putString("lastSource", source)
                     .remove("lastStartedInForeground").remove("lastFinishedInForeground").remove("lastReplySavedInForeground")
+                    .putLong("lastScheduledFor", at).putString("lastStopReason", "none").putInt("lastWorkerStopReason", -256)
                     .putLong("lastReplySavedAt", 0).putLong("lastNotificationAt", 0).putString("lastNotificationStatus", "none").commit();
                 HeartbeatWork.Host host = HeartbeatWork.host.get();
                 if (host == null) { HeartbeatWork.recordMissingRuntime(context); return "runtime-unavailable"; }
-                session = new HeartbeatWork.Session(ruleId, at, host);
+                session = new HeartbeatWork.Session(context, ruleId, at, host);
                 HeartbeatWork.sessions.put(session.id, session); session.ownerRunner = this;
                 HeartbeatWork.prefs(context).edit().putBoolean("lastStartedInForeground", host.isForeground()).commit();
                 HeartbeatWork.record(context, "running", true);
@@ -62,11 +63,13 @@ final class HeartbeatSessionRunner {
         active = null;
         return outcome;
     }
-    void cancel() {
+    void cancel() { cancel("native-cancelled"); }
+    void cancel(String reason) { cancel(reason, -256); }
+    void cancel(String reason, int workerStopReason) {
         cancelled = true;
         HeartbeatWork.Session session = active;
         synchronized (HeartbeatWork.LOCK) {
-            if (session != null && session.ownerRunner == this && !session.result.isDone()) HeartbeatWork.stop(session);
+            if (session != null && session.ownerRunner == this && !session.result.isDone()) HeartbeatWork.stop(session, reason, workerStopReason);
         }
     }
 }

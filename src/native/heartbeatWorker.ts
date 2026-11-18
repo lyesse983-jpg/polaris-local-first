@@ -13,6 +13,7 @@ export type HeartbeatWorkerStatus = {
   lastReplySavedAt?: number; lastReplySavedInForeground?: boolean;
   lastNotificationAt?: number; lastNotificationStatus?: string;
   lastWindowStatus?: string;
+  lastScheduledFor?: number; lastStopReason?: string; lastWorkerStopReason?: number;
 };
 type WorkerPlugin = {
   sync(options: {appointments: {ruleId: string; scheduledFor: number}[]}): Promise<void>;
@@ -45,7 +46,9 @@ export async function readHeartbeatWorkerStatus() {
   return status ? {...status, connectionIssue: activeConnection?.failed() ?? false} : null;
 }
 export function shouldDeferToNativeHeartbeatWorker() {
-  return enabled && canUseHeartbeatWorker() && typeof document !== 'undefined' && document.visibilityState === 'hidden';
+  // One scheduling owner, including while visible: a JS claim would remove the exact
+  // alarm before its receiver can establish the protected native execution window.
+  return enabled && canUseHeartbeatWorker();
 }
 export async function setHeartbeatWorkerEnabled(enabled: boolean) {
   const status = await Worker.setEnabled({enabled});

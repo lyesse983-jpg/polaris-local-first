@@ -72,10 +72,12 @@ describe('Android worker to shared runtime bridge', () => {
     await syncNativeHeartbeatAppointments(rules as never);
     expect(mock.sync).toHaveBeenCalledExactlyOnceWith({appointments: [{ruleId: 'a', scheduledFor: 42}]});
   });
-  it('defers hidden-page timer execution only when the native experiment is enabled', async () => {
+  it('defers both visible and hidden page timers to the enabled native scheduling owner', async () => {
     vi.stubGlobal('document', {visibilityState: 'hidden'}); await readHeartbeatWorkerStatus();
     expect(shouldDeferToNativeHeartbeatWorker()).toBe(true);
-    vi.stubGlobal('document', {visibilityState: 'visible'}); expect(shouldDeferToNativeHeartbeatWorker()).toBe(false);
+    vi.stubGlobal('document', {visibilityState: 'visible'}); expect(shouldDeferToNativeHeartbeatWorker()).toBe(true);
+    mock.status.mockResolvedValueOnce({enabled: false, runtimeReady: true, lastOutcome: 'never', lastStartedAt: 0, lastFinishedAt: 0});
+    await readHeartbeatWorkerStatus(); expect(shouldDeferToNativeHeartbeatWorker()).toBe(false);
     mock.native = false; expect(installNativeHeartbeatRuntime(vi.fn())).toBeTypeOf('function');
   });
 });

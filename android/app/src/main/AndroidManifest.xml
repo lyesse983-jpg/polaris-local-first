@@ -48,13 +48,14 @@
             <meta-data android:name="photopicker_activity:0:required" android:value="" />
         </service>
 
-        <service android:name=".HeartbeatForegroundService" android:exported="false"
-            android:foregroundServiceType="dataSync" android:stopWithTask="true" />
         <service
             android:name=".HeartbeatForegroundService"
             android:exported="false"
             android:stopWithTask="true"
             android:foregroundServiceType="dataSync" />
+
+        <service android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync" tools:node="merge" />
 
         <receiver
             android:name=".PolarisTriggerAlarmReceiver"
@@ -64,9 +65,6 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />

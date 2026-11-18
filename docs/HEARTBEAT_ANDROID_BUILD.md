@@ -172,3 +172,16 @@ Android instrumentation 回归使用合成的数 MB 中文与 emoji JSON，确�
 依据：[dataSync 服务类型](https://developer.android.com/develop/background-work/services/fgs/service-types#data-sync)、[后台启动前台服务的限制和精确闹钟例外](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start)、[前台服务超时](https://developer.android.com/develop/background-work/services/fgs/timeout)。
 
 保护窗口可接管已启动的同一原生任务；该接管完成后，系统取消兜底 Worker 不会误取消前台服务持有的执行。新增合成原生回归验证这项所有权转移及最终完成回执。
+
+
+### 到点自动触发的兜底保护
+
+用户确认使用编辑预约时间后等待自动触发，未使用立即测试。设备最后报告普通后台任务由前台转入后台后中止；这不证明具体中止来源，也不证明截图中的当前下一次预约就是该任务。
+
+开启后台实验后，前台计时器也交由原生调度器领取预约，避免 JS 先消费规则并同步删除尚未启动的精确闹钟。WorkManager 兜底在分发模型/工具前等待 `setForegroundAsync` 确认保护窗口，声明合并的 `SystemForegroundService` dataSync 类型；其通知停止动作取消对应 WorkRequest。系统拒绝保护时保留明确状态，普通兜底仍受系统后台限制。相同五分钟执行上限和已有运行环境要求继续适用，无冷启动模型引擎。
+
+状态增加当次预约时间、首次原生中止来源和 WorkManager 中止代码；失效 Worker 的后续清理不覆盖已移交的租约。运行返回 aborted 时写入规则错误，保留后续自主预约，不自动重试可能已产生副作用的工具调用。
+
+新增真实 WorkManager 回归覆盖编辑预约后自动触发、领取时同步移除旧预约不会中止活跃会话，以及完成回执。该测试仍使用合成 host，不等同于手机上的 Claude/MCP 全链路验收。
+
+依据：[WorkManager 的前台执行支持](https://developer.android.com/develop/background-work/background-tasks/persistent/how-to/long-running)。Android 16 及以上仍有任务额度限制，不能承诺精确到秒或永不被系统停止。

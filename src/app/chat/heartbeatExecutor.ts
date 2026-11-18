@@ -118,6 +118,7 @@ export function createHeartbeatExecutor(getContext: () => HeartbeatExecutionCont
           onAssistantMessageCommitted: publisher ? id => { if (!disposed) { request.onReplySaved?.(); publisher.publish(id); } } : undefined});
         outcome = result.status;
         if (outcome === 'failed') store.runtime.markTriggerFailed(rule.id, '本次心跳运行失败，已保留工具证据。');
+        if (outcome === 'aborted') store.runtime.markTriggerFailed(rule.id, '本次心跳被中止，尚未确认回复完成。');
         // Native worker acknowledgement comes after both storage and notification delivery settle.
         await publisher?.deliverySettled();
       } catch {
