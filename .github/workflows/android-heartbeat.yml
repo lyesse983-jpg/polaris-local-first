@@ -41,6 +41,11 @@ jobs:
           src/app/chat/triggerConversationResolution.test.ts
           src/native/localTriggerNotifications.test.ts
           src/app/chat/heartbeatScheduling.test.ts
+          src/engines/mcpRuntime.test.ts
+          src/app/chat/chatReplyRuntime.test.ts
+          src/app/chat/chatReplyFlow.test.ts
+          src/app/chat/chatStreamingSession.test.ts
+          src/app/chat/triggerOffscreenExecution.test.ts
           src/app/chat/silentTriggerChatPort.test.ts
           src/ui/shell/menu/automationHeartbeatForm.test.ts
           src/engines/tool-protocol/heartbeatScheduleParser.test.ts

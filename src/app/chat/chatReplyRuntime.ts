@@ -23,6 +23,7 @@ import {
   resolveNativeToolCardActions
 } from './chatAssistantToolRuntime';
 import { isAbortError, throwIfAborted } from './chatAbortError';
+import { awaitReplyPreparation } from './chatReplyPreparation';
 import { resolveAssistantToolPreparationOutcome } from './chatToolOutcome';
 import type { ToolActionRunOutcome } from './chatToolOutcome';
 import {
@@ -311,28 +312,9 @@ async function requestReplyRound({
       `mcp servers ${effectiveToolContext.mcpServers?.length ?? 0}`
     ]
   });
-  const desktopLocalHost = await readDesktopLocalHostPromptState();
-  const effectiveToolContextWithDesktop = desktopLocalHost
-    ? { ...effectiveToolContext, desktopLocalHost }
-    : effectiveToolContext;
-  const mcpToolCatalog = await resolveMcpToolCatalog({
-    servers: effectiveToolContextWithDesktop.mcpServers,
-    timeoutSeconds: effectiveToolContextWithDesktop.mcpToolTimeoutSeconds
-  });
-  recordChatSendPerformanceMark(conversationId, '聊天发送 · 外部工具目录就绪', {
-    extra: [
-      desktopLocalHost ? 'desktop bridge yes' : 'desktop bridge no',
-      `mcp tools ${mcpToolCatalog.tools?.length ?? 0}`,
-      mcpToolCatalog.errors?.length ? `mcp errors ${mcpToolCatalog.errors.length}` : null
-    ]
-  });
-  const toolContextWithMcp = {
-    ...effectiveToolContextWithDesktop,
-    mcpTools: mcpToolCatalog.tools,
-    mcpCatalogErrors: mcpToolCatalog.errors
-  };
-  const availableToolNames = resolveAvailablePolarisToolNames(toolContextWithMcp);
-  const ignoredUnknownNativeToolNames = Array.from(availableToolNames);
+  let toolContextWithMcp: AssistantToolContext = effectiveToolContext;
+  let availableToolNames = resolveAvailablePolarisToolNames(toolContextWithMcp);
+  let ignoredUnknownNativeToolNames = Array.from(availableToolNames);
   const placeholderId = createUid('assistant');
   const streaming = createStreamingSession({
     ui,
@@ -368,6 +350,31 @@ async function requestReplyRound({
   recordChatSendPerformanceMark(conversationId, '聊天发送 · 占位消息已显示');
 
   try {
+    const desktopLocalHost = await awaitReplyPreparation(readDesktopLocalHostPromptState(), streaming.controller.signal);
+    const effectiveToolContextWithDesktop = desktopLocalHost
+      ? { ...effectiveToolContext, desktopLocalHost }
+      : effectiveToolContext;
+    const mcpToolCatalog = await awaitReplyPreparation(resolveMcpToolCatalog({
+      servers: effectiveToolContextWithDesktop.mcpServers,
+      timeoutSeconds: effectiveToolContextWithDesktop.mcpToolTimeoutSeconds,
+      maxCacheAgeMs: 60_000
+    }), streaming.controller.signal);
+    recordChatSendPerformanceMark(conversationId, '聊天发送 · 外部工具目录就绪', {
+      extra: [
+        desktopLocalHost ? 'desktop bridge yes' : 'desktop bridge no',
+        `mcp tools ${mcpToolCatalog.tools?.length ?? 0}`,
+        mcpToolCatalog.errors?.length ? `mcp errors ${mcpToolCatalog.errors.length}` : null
+      ]
+    });
+    toolContextWithMcp = {
+      ...effectiveToolContextWithDesktop,
+      mcpTools: mcpToolCatalog.tools,
+      mcpCatalogErrors: mcpToolCatalog.errors
+    };
+    availableToolNames = resolveAvailablePolarisToolNames(toolContextWithMcp);
+    ignoredUnknownNativeToolNames = Array.from(availableToolNames);
+    streaming.setToolCatalog({ ignoredUnknownNativeToolNames, mcpTools: toolContextWithMcp.mcpTools ?? [] });
+    throwIfAborted(streaming.controller.signal);
     const reply = await requestCollaboratorReply({
       api: activeRequestSnapshot.api,
       providers: activeRequestSnapshot.providers,

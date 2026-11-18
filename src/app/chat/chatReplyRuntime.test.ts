@@ -146,6 +146,37 @@ function buildExecutedStartTaskOutcome(action: Extract<ToolActionRunOutcome['act
 }
 
 describe('requestReply task activation', () => {
+  it('shows a waiting reply before slow MCP discovery and lets cancellation finish without waiting for the catalog', async () => {
+    vi.stubGlobal('window', {setTimeout, clearTimeout, requestAnimationFrame: (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0), cancelAnimationFrame: clearTimeout});
+    let release!: (value: McpToolCatalogResolution) => void;
+    const catalog = new Promise<McpToolCatalogResolution>((resolve) => { release = resolve; });
+    resolveMcpToolCatalogMock.mockImplementationOnce(() => catalog);
+    requestCollaboratorReplyMock.mockReset();
+    const user: ChatMessage = {id: 'user-wait', role: 'user', content: 'synthetic', timestamp: 1};
+    let messages = [user];
+    const controls = {abortControllerRef: {current: null as AbortController | null}, setSending: vi.fn(), setStreaming: vi.fn(), streamingLifecycleReleaseRef: {current: null}};
+    const request = requestReply({ui: controls, chat: {
+      addMessage: (_target, message) => { messages = [...messages, message]; },
+      updateMessage: (_target, id, patch) => { messages = messages.map(message => message.id === id ? {...message, ...patch} : message); },
+      findConversation: () => ({ ...buildWritableConversation(messages).conversation, messages }),
+      findConversationMessage: (_id, messageId) => messages.find(message => message.id === messageId),
+      getConversationMessages: () => messages, getConversationTask: () => null,
+      replaceConversationMessages: (_target, next) => { messages = next; },
+      setConversationTask: vi.fn(), appendRuntimeFeedbackEvent: vi.fn(), insertMessageBefore: vi.fn(), persistToDb: vi.fn(async () => undefined)
+    }, executeToolActions: vi.fn(async () => []), conversationId: 'conversation-1', writableConversation: buildWritableConversation(messages),
+      collaboratorId: 'pharos', messages, requestSnapshot: buildRequestSnapshot(null) });
+    try {
+      await vi.waitFor(() => expect(resolveMcpToolCatalogMock).toHaveBeenCalled());
+      expect(messages.some(message => message.role === 'assistant')).toBe(true);
+      expect(controls.setSending).toHaveBeenCalledWith(true);
+      expect(requestCollaboratorReplyMock).not.toHaveBeenCalled();
+      controls.abortControllerRef.current!.abort();
+      await expect(request).resolves.toEqual({status: 'aborted'});
+      expect(controls.setSending).toHaveBeenLastCalledWith(false);
+      expect(requestCollaboratorReplyMock).not.toHaveBeenCalled();
+    } finally { release({tools: [], errors: []}); await catalog; vi.unstubAllGlobals(); }
+  });
+
   it('auto-retries a tool preparation failure before showing a failed tool event', async () => {
     vi.stubGlobal('window', {
       setTimeout,

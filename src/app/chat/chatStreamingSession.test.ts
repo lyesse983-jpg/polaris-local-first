@@ -30,6 +30,35 @@ function buildWritableConversation(messages: ChatMessage[] = []): WritableConver
 }
 
 describe('createStreamingSession', () => {
+  it('writes received text without a paint callback and never flushes twice when painting resumes', async () => {
+    vi.useFakeTimers();
+    let frame: FrameRequestCallback | undefined;
+    let state: ChatStreamingState = null;
+    const updateMessage = vi.fn();
+    vi.stubGlobal('window', { setTimeout, clearTimeout,
+      requestAnimationFrame: (callback: FrameRequestCallback) => { frame = callback; return 1; }, cancelAnimationFrame: vi.fn() });
+    const session = createStreamingSession({
+      ui: {abortControllerRef: {current: null}, streamingLifecycleReleaseRef: {current: null},
+        setSending: vi.fn(), setStreaming: (value) => { state = typeof value === 'function' ? value(state) : value; }},
+      chat: {addMessage: vi.fn(), updateMessage}, conversationId: 'offscreen', writableConversation: buildWritableConversation(),
+      placeholderId: 'reply', assistantName: 'Synthetic', modelTier: 'medium', themeToolMode: 'off'
+    });
+    try {
+      session.start();
+      session.queueProgress({content: 'Text arrived while the conversation view was not painting'});
+      expect(updateMessage).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(updateMessage).toHaveBeenCalledOnce();
+      expect(state).toEqual({messageId: 'reply', phase: 'live'});
+      frame?.(0);
+      expect(updateMessage).toHaveBeenCalledOnce();
+      session.queueProgress({content: 'later text'});
+      session.finish();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(updateMessage).toHaveBeenCalledOnce();
+    } finally { session.finish(); vi.useRealTimers(); vi.unstubAllGlobals(); }
+  });
+
   it('keeps the placeholder in stage until the first streamed patch flushes', () => {
     let streamingState: ChatStreamingState = null;
     let scheduledFrame: RafCallback | null = null;
