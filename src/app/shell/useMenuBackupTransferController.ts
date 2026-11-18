@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { isWebDavConfigured } from '../../engines/webdavBackup';
 import {
   canUseNativeSystemBackupFiles,
@@ -16,6 +16,7 @@ import {
   exportCompleteBackup,
   formatCompleteBackupExportError
 } from './completeBackupExport';
+import { usePersonaStore } from '../../stores/personaStore';
 import { formatStoreImportResult } from '../../stores/storeImportResult';
 
 type MenuBackupTransferUi = {
@@ -69,6 +70,7 @@ export function useMenuBackupTransferController({
   ui,
   webdav
 }: UseMenuBackupTransferControllerArgs) {
+  const browserImportMode = useRef<'full' | 'memory-repair'>('full');
   const [exportingData, setExportingData] = useState(false);
   const [importingData, setImportingData] = useState(false);
   const [exportProgress, setExportProgress] = useState<StoreTransferProgress | null>(null);
@@ -91,12 +93,19 @@ export function useMenuBackupTransferController({
   const localExportProgress = exportingData ? resolveStoreTransferProgressPercent(exportProgress) : null;
   const localImportProgress = importingData ? resolveStoreTransferProgressPercent(importProgress) : null;
 
-  const runImport = async (file: Blob) => {
+  const runImport = async (file: Blob, mode: 'full' | 'memory-repair' = 'full') => {
     try {
       setImportingData(true);
       setImportProgress({ message: '识别备份包' });
-      const result = await importBackupData(file, setImportProgress);
-      ui.alert(formatStoreImportResult(result));
+      if (mode === 'memory-repair') {
+        setImportProgress({ message: '核对并补回缺失记忆文档' });
+        const { repairMemoryDocumentsFromBackup } = await import('../../stores/repairMemoryDocuments');
+        const result = await repairMemoryDocumentsFromBackup(file, () => usePersonaStore.getState().personas);
+        ui.alert(`已补回 ${result.repaired} 份记忆文档。${result.unresolved ? `另有 ${result.unresolved} 份未找到相同版本正文，请选择原版完整备份。` : ''}已有正文、聊天、人设和设置均未替换。`);
+      } else {
+        const result = await importBackupData(file, setImportProgress);
+        ui.alert(formatStoreImportResult(result));
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : '文件格式不正确';
       ui.alert(message);
@@ -123,6 +132,7 @@ export function useMenuBackupTransferController({
   };
 
   const importData = async () => {
+    browserImportMode.current = 'full';
     if (systemBackupAvailability === 'unavailable') {
       ui.alert('当前 App 版请先使用 WebDAV 导入备份包。');
       return;
@@ -152,6 +162,20 @@ export function useMenuBackupTransferController({
     if (completionMessage) {
       ui.alert(completionMessage);
     }
+  };
+
+  const repairMemoryDocuments = async () => {
+    if (canUseNativeSystemBackupFiles()) {
+      try {
+        const file = await importBackupViaSystemFiles();
+        if (file) await runImport(file, 'memory-repair');
+      } catch (error) {
+        ui.alert(formatMenuLocalBackupError(error, '导入'));
+      }
+      return;
+    }
+    browserImportMode.current = 'memory-repair';
+    ui.triggerBrowserImportPicker();
   };
 
   const exportToWebDav = async () => {
@@ -199,11 +223,14 @@ export function useMenuBackupTransferController({
     localExportProgress,
     localImportProgress,
     onImportBrowserFileSelected: async (file: File | null) => {
+      const mode = browserImportMode.current;
+      browserImportMode.current = 'full';
       if (!file) return;
-      await runImport(file);
+      await runImport(file, mode);
     },
     onExportData: exportData,
     onImportData: importData,
+    onRepairMemoryDocuments: repairMemoryDocuments,
     onExportToWebDav: exportToWebDav,
     onImportFromWebDav: importFromWebDav
   };

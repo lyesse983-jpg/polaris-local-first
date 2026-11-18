@@ -156,6 +156,9 @@ export function MenuSheet({
             onImportData={() => {
               void controller.onImportData();
             }}
+            onRepairMemoryDocuments={() => {
+              void controller.onRepairMemoryDocuments();
+            }}
             onExportToWebDav={() => {
               void controller.onExportToWebDav();
             }}

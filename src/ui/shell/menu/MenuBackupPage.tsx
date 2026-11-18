@@ -23,6 +23,7 @@ type MenuBackupPageProps = {
   onSetWebDavPassword: (value: string) => void;
   onExportData: () => void;
   onImportData: () => void;
+  onRepairMemoryDocuments: () => void;
   onExportToWebDav: () => void;
   onImportFromWebDav: () => void;
 };
@@ -46,6 +47,7 @@ export function MenuBackupPage({
   onSetWebDavPassword,
   onExportData,
   onImportData,
+  onRepairMemoryDocuments,
   onExportToWebDav,
   onImportFromWebDav
 }: MenuBackupPageProps) {
@@ -94,6 +96,13 @@ export function MenuBackupPage({
           detail={localImportDetail || t('settings.backup.importDetailFallback')}
           progress={localImportProgress}
           onClick={onImportData}
+          disabled={busy || !localBackupAvailable}
+        />
+        <MenuSheetItem
+          icon="fileText"
+          title={t('settings.backup.repairMemoryDocuments')}
+          detail={t('settings.backup.repairMemoryDocumentsDetail')}
+          onClick={onRepairMemoryDocuments}
           disabled={busy || !localBackupAvailable}
         />
       </section>

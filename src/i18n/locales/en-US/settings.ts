@@ -623,6 +623,8 @@ export const settings = {
   'settings.backup.localAvailableNote': 'Export or import complete Polaris backups here. Kelivo zip packages can also be restored.',
   'settings.backup.localUnavailableNote': 'This app build uses WebDAV for backup export and restore.',
   'settings.backup.exporting': 'Exporting...',
+  'settings.backup.repairMemoryDocuments': 'Recover missing memory documents',
+  'settings.backup.repairMemoryDocumentsDetail': 'Choose an original backup with bodies; keep current chats and settings',
   'settings.backup.exportCurrent': 'Export current complete backup',
   'settings.backup.importing': 'Importing...',
   'settings.backup.importFromPackage': 'Restore from backup file',
