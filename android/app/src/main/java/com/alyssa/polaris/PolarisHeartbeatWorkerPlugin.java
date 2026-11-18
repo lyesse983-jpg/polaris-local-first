@@ -10,7 +10,7 @@ public class PolarisHeartbeatWorkerPlugin extends Plugin implements HeartbeatWor
     private JSObject snapshot() {
         JSObject status = new JSObject();
         status.put("enabled", HeartbeatWork.prefs(getContext()).getBoolean("enabled", false));
-        synchronized (HeartbeatWork.LOCK) { status.put("runtimeReady", HeartbeatWork.host.get() != null); }
+        synchronized (HeartbeatWork.LOCK) { status.put("runtimeReady", HeartbeatWork.host.get() == this && hasListeners("wake") && hasListeners("stop")); }
         status.put("lastMissingReason", HeartbeatWork.prefs(getContext()).getString("lastMissingReason", "unknown"));
         status.put("lastOutcome", HeartbeatWork.prefs(getContext()).getString("lastOutcome", "never"));
         status.put("lastStartedAt", HeartbeatWork.prefs(getContext()).getLong("lastStartedAt", 0));
