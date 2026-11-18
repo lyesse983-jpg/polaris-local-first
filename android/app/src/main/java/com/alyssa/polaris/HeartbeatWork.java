@@ -138,6 +138,20 @@ final class HeartbeatWork {
             MAIN.post(() -> deliver(session, "stop"));
         }
     }
+    static boolean beginWindow(Context context, String owner, boolean takeover) {
+        synchronized (LOCK) {
+            if (!takeover && "running".equals(prefs(context).getString("lastWindowStatus", "none"))
+                && !prefs(context).getString("windowOwner", "").isEmpty()) return false;
+            prefs(context).edit().putString("windowOwner", owner).putString("lastWindowStatus", "running").commit();
+            return true;
+        }
+    }
+    static void endWindow(Context context, String owner) {
+        synchronized (LOCK) {
+            if (owner.equals(prefs(context).getString("windowOwner", "")))
+                prefs(context).edit().putString("lastWindowStatus", "finished").remove("windowOwner").commit();
+        }
+    }
     static void noteRegistration(Context context) {
         prefs(context).edit().putString("lastBoundProcess", PROCESS_TOKEN).commit();
     }

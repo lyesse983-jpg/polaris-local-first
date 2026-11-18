@@ -185,3 +185,5 @@ Android instrumentation 回归使用合成的数 MB 中文与 emoji JSON，确�
 新增真实 WorkManager 回归覆盖编辑预约后自动触发、领取时同步移除旧预约不会中止活跃会话，以及完成回执。该测试仍使用合成 host，不等同于手机上的 Claude/MCP 全链路验收。
 
 依据：[WorkManager 的前台执行支持](https://developer.android.com/develop/background-work/background-tasks/persistent/how-to/long-running)。Android 16 及以上仍有任务额度限制，不能承诺精确到秒或永不被系统停止。
+
+首轮安卓回归发现：精确闹钟服务已持有会话时，迟到的兜底 Worker 仍可能短暂取得另一份前台保护，然后返回 already-running 并把共享窗口状态写成 finished。已增加活跃会话短路及窗口状态所有者，保护窗口接管后，旧窗口结束不会覆盖当前状态；停止动作回归保持启用，未跳过失败检查。

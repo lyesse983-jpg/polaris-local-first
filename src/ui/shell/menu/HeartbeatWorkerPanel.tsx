@@ -64,7 +64,6 @@ export function HeartbeatWorkerStatusView({status, busy, error, en, onRefresh, o
         'native-cancelled': en ? 'Native execution cancelled' : '原生执行被取消'
       } as Record<string, string>)[status.lastStopReason] ?? status.lastStopReason}
       {status.lastStopReason === 'work-manager-stopped' ? ` (${status.lastWorkerStopReason ?? -256})` : ''}</p> : null}
-      {status.lastStopReason === 'work-manager-stopped' && typeof status.lastWorkerStopReason === 'number' ? <p>{en ? 'Android stop code: ' : '安卓中止代码：'}{status.lastWorkerStopReason}</p> : null}
       {status.lastSource && status.lastSource !== 'none' ? <p>{en ? 'Execution path: ' : '执行通道：'}{['foreground-service', 'work-manager-foreground'].includes(status.lastSource) ? (en ? 'protected execution window' : '短时保护运行') : (en ? 'regular background task' : '普通后台任务')}</p> : null}
       {typeof status.lastStartedInForeground === 'boolean' && typeof status.lastFinishedInForeground === 'boolean' ? <p>
         {en ? 'App visibility: ' : '运行界面：'}{status.lastStartedInForeground ? (en ? 'foreground' : '前台') : (en ? 'background' : '后台')} → {status.lastFinishedInForeground ? (en ? 'foreground' : '前台') : (en ? 'background' : '后台')}

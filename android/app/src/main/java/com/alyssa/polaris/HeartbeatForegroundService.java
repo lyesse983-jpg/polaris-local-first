@@ -16,6 +16,7 @@ public class HeartbeatForegroundService extends Service {
     private final HeartbeatSessionRunner runner = new HeartbeatSessionRunner();
     private PowerManager.WakeLock wakeLock;
     private boolean running;
+    private final String windowOwner = "alarm:" + java.util.UUID.randomUUID();
     private final Runnable deadline = () -> { runner.cancel(); stopSelf(); };
 
     static boolean awaitingExactAlarm(Context context, String id, long at) {
@@ -70,7 +71,8 @@ public class HeartbeatForegroundService extends Service {
             HeartbeatWork.prefs(this).edit().putString("lastWindowStatus", "start-blocked").commit(); stopSelf(); return START_NOT_STICKY;
         }
         running = true;
-        HeartbeatWork.prefs(this).edit().putString("lastWindowStatus", "running").putLong("lastWindowStartedAt", System.currentTimeMillis()).putLong("lastWindowFinishedAt", 0).commit();
+        HeartbeatWork.beginWindow(this, windowOwner, true);
+        HeartbeatWork.prefs(this).edit().putLong("lastWindowStartedAt", System.currentTimeMillis()).putLong("lastWindowFinishedAt", 0).commit();
         HeartbeatWork.MAIN.postDelayed(deadline, 330_000);
         executor.execute(() -> {
             try { runner.run(getApplicationContext(), id, at, "foreground-service"); }
@@ -83,7 +85,10 @@ public class HeartbeatForegroundService extends Service {
     @Override public void onDestroy() {
         runner.cancel(); HeartbeatWork.MAIN.removeCallbacks(deadline); executor.shutdownNow();
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
-        if (running) HeartbeatWork.prefs(this).edit().putString("lastWindowStatus", "finished").putLong("lastWindowFinishedAt", System.currentTimeMillis()).commit();
+        if (running) {
+            HeartbeatWork.endWindow(this, windowOwner);
+            HeartbeatWork.prefs(this).edit().putLong("lastWindowFinishedAt", System.currentTimeMillis()).commit();
+        }
         stopForeground(STOP_FOREGROUND_REMOVE); super.onDestroy();
     }
 }

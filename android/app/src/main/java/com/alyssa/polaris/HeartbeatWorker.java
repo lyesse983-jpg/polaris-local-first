@@ -35,14 +35,19 @@ public class HeartbeatWorker extends Worker {
         Context context = getApplicationContext();
         String id = getInputData().getString("ruleId"); long at = getInputData().getLong("scheduledFor", -1);
         if (id == null || !HeartbeatWork.current(context, id, at)) return Result.success();
+        synchronized (HeartbeatWork.LOCK) {
+            if (HeartbeatWork.activeKey(HeartbeatWork.key(id, at))) return Result.success();
+        }
         if (HeartbeatForegroundService.awaitingExactAlarm(context, id, at)) return Result.retry();
         if (isStopped()) return Result.success();
         // No model/tool call until WorkManager has acknowledged its foreground lease.
         boolean protectedWindow = false;
+        boolean ownsWindowStatus = false;
+        String windowOwner = "worker:" + getId();
         try {
             setForegroundAsync(foregroundInfo()).get(15, TimeUnit.SECONDS);
             protectedWindow = true;
-            HeartbeatWork.prefs(context).edit().putString("lastWindowStatus", "running").commit();
+            ownsWindowStatus = HeartbeatWork.beginWindow(context, windowOwner, false);
         } catch (InterruptedException stopped) {
             Thread.currentThread().interrupt(); return Result.success();
         } catch (Exception blocked) {
@@ -53,7 +58,7 @@ public class HeartbeatWorker extends Worker {
             String outcome = runner.run(context, id, at, protectedWindow ? "work-manager-foreground" : "work-manager");
             return "busy".equals(outcome) && getRunAttemptCount() < 2 ? Result.retry() : Result.success();
         } finally {
-            if (protectedWindow) HeartbeatWork.prefs(context).edit().putString("lastWindowStatus", "finished").commit();
+            if (ownsWindowStatus) HeartbeatWork.endWindow(context, windowOwner);
         }
     }
     @Override public void onStopped() {

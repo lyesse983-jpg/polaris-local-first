@@ -165,6 +165,11 @@ public class HeartbeatWorkerTest {
             long until = SystemClock.elapsedRealtime() + 5_000;
             while (!"foreground-service".equals(HeartbeatWork.prefs(context).getString("lastSource", "")) && SystemClock.elapsedRealtime() < until) SystemClock.sleep(20);
             assertEquals("foreground-service", HeartbeatWork.prefs(context).getString("lastSource", ""));
+            HeartbeatWork.beginWindow(context, "synthetic-fallback-window", false);
+            HeartbeatWork.beginWindow(context, "synthetic-alarm-window", true);
+            HeartbeatWork.endWindow(context, "synthetic-fallback-window");
+            assertEquals("running", HeartbeatWork.prefs(context).getString("lastWindowStatus", ""));
+            assertFalse(HeartbeatWork.beginWindow(context, "synthetic-late-fallback", false));
             fallback.cancel();
             HeartbeatWork.Session session;
             synchronized (HeartbeatWork.LOCK) { session = HeartbeatWork.sessions.values().iterator().next(); assertFalse(session.result.isDone()); }
