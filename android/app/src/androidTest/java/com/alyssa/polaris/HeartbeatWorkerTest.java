@@ -72,6 +72,20 @@ public class HeartbeatWorkerTest {
         assertTrue(HeartbeatWork.current(context, "synthetic-no-runtime", at));
         assertEquals(0, HeartbeatWork.prefs(context).getLong("lastStartedAt", 0));
     }
+    @Test public void missingRegistrationInSameProcessIsDiagnosedWithoutClaimingProcessDeath() throws Exception {
+        HeartbeatWork.noteRegistration(context);
+        schedule("synthetic-registration-lost", System.currentTimeMillis() - 1_000);
+        awaitOutcome("runtime-unavailable");
+        assertEquals("registration-lost", HeartbeatWork.prefs(context).getString("lastMissingReason", ""));
+    }
+    @Test public void changedProcessTokenIsRecordedAtFailureAndNotOverwrittenByLaterRegistration() throws Exception {
+        HeartbeatWork.prefs(context).edit().putString("lastBoundProcess", "synthetic-previous-process").commit();
+        schedule("synthetic-process-change", System.currentTimeMillis() - 1_000);
+        awaitOutcome("runtime-unavailable");
+        assertEquals("process-restarted", HeartbeatWork.prefs(context).getString("lastMissingReason", ""));
+        HeartbeatWork.noteRegistration(context);
+        assertEquals("process-restarted", HeartbeatWork.prefs(context).getString("lastMissingReason", ""));
+    }
     @Test public void disablingBackgroundStopsTheSameActiveSession() throws Exception {
         AtomicInteger stops = new AtomicInteger();
         HeartbeatWork.Host host = (event, id, ruleId, at) -> { if ("stop".equals(event)) stops.incrementAndGet(); };

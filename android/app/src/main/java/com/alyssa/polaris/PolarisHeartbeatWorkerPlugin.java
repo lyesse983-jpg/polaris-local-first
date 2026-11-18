@@ -11,6 +11,7 @@ public class PolarisHeartbeatWorkerPlugin extends Plugin implements HeartbeatWor
         JSObject status = new JSObject();
         status.put("enabled", HeartbeatWork.prefs(getContext()).getBoolean("enabled", false));
         synchronized (HeartbeatWork.LOCK) { status.put("runtimeReady", HeartbeatWork.host.get() != null); }
+        status.put("lastMissingReason", HeartbeatWork.prefs(getContext()).getString("lastMissingReason", "unknown"));
         status.put("lastOutcome", HeartbeatWork.prefs(getContext()).getString("lastOutcome", "never"));
         status.put("lastStartedAt", HeartbeatWork.prefs(getContext()).getLong("lastStartedAt", 0));
         status.put("lastFinishedAt", HeartbeatWork.prefs(getContext()).getLong("lastFinishedAt", 0));
@@ -32,7 +33,13 @@ public class PolarisHeartbeatWorkerPlugin extends Plugin implements HeartbeatWor
     @PluginMethod public void runtimeReady(PluginCall call) {
         String owner = call.getString("owner");
         if (owner == null || owner.length() > 200) { call.reject("无效运行环境。"); return; }
-        HeartbeatWork.bind(owner, this, Boolean.TRUE.equals(call.getBoolean("ready"))); call.resolve();
+        boolean ready = Boolean.TRUE.equals(call.getBoolean("ready"));
+        if (ready && (!hasListeners("wake") || !hasListeners("stop"))) {
+            call.reject("后台执行监听尚未就绪。"); return;
+        }
+        HeartbeatWork.bind(owner, this, ready);
+        if (ready) HeartbeatWork.noteRegistration(getContext());
+        call.resolve();
     }
     @PluginMethod public void finish(PluginCall call) {
         String id = call.getString("sessionId"), outcome = call.getString("outcome");

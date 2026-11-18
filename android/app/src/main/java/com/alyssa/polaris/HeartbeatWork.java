@@ -15,6 +15,7 @@ import org.json.*;
 /** Native scheduling and bounded hand-off only. Chat, credentials and model calls stay in the existing runtime. */
 final class HeartbeatWork {
     static final String PREFS = "polaris-heartbeat-worker-v1";
+    static final String PROCESS_TOKEN = UUID.randomUUID().toString();
     static final String TAG = "polaris-heartbeat-worker";
     static final Object LOCK = new Object();
     static final Handler MAIN = new Handler(Looper.getMainLooper());
@@ -124,6 +125,16 @@ final class HeartbeatWork {
     static void stop(Session session) {
         MAIN.post(() -> deliver(session, "stop"));
         session.result.complete("aborted");
+    }
+    static void noteRegistration(Context context) {
+        prefs(context).edit().putString("lastBoundProcess", PROCESS_TOKEN).commit();
+    }
+    static void recordMissingRuntime(Context context) {
+        String previous = prefs(context).getString("lastBoundProcess", "");
+        String reason = previous.isEmpty() ? "no-registration-record"
+            : previous.equals(PROCESS_TOKEN) ? "registration-lost" : "process-restarted";
+        prefs(context).edit().putString("lastMissingReason", reason).commit();
+        record(context, "runtime-unavailable", false);
     }
     static void record(Context c, String outcome, boolean start) {
         SharedPreferences.Editor edit = prefs(c).edit().putString("lastOutcome", outcome);
