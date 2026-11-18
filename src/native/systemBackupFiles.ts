@@ -213,11 +213,15 @@ export async function addZipTextEntryViaSystemFiles(exportId: string, path: stri
   ) {
     await SystemFile.beginZipTextEntry({ exportId, path });
     try {
-      for (let offset = 0; offset < text.length; offset += NATIVE_ZIP_TEXT_CHUNK_CHARS) {
-        await SystemFile.appendZipTextChunk({
-          exportId,
-          text: text.slice(offset, offset + NATIVE_ZIP_TEXT_CHUNK_CHARS)
-        });
+      for (let offset = 0; offset < text.length;) {
+        let end = Math.min(offset + NATIVE_ZIP_TEXT_CHUNK_CHARS, text.length);
+        // Each native call UTF-8 encodes its string separately; keep a surrogate
+        // pair in one call so supplementary characters are never replaced.
+        const last = text.charCodeAt(end - 1);
+        const next = text.charCodeAt(end);
+        if (end < text.length && last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end -= 1;
+        await SystemFile.appendZipTextChunk({ exportId, text: text.slice(offset, end) });
+        offset = end;
       }
       await SystemFile.finishZipTextEntry({ exportId });
       return;

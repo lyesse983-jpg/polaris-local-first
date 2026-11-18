@@ -60,3 +60,7 @@ public/tutorial.html
 *.swp
 
 # Local working notes.
+
+# Local APK build outputs
+artifacts/
+.heartbeat-signing/

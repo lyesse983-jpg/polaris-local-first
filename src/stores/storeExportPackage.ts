@@ -347,15 +347,17 @@ async function createStructuredExportZip(
   options: StructuredExportPackageOptions = {}
 ) {
   const zip = new JSZip();
+  // JSZip encodes strings in independent chunks that can bisect a UTF-16 pair.
+  // Encode each JSON entry once before its bytes enter the ZIP stream.
   const stores = await readStructuredExportStores(snapshot, options);
   const assets = snapshot.assetEntries ? await Promise.resolve(snapshot.assetEntries) : await exportAssetEntries();
 
-  zip.file('stores/space.json', jsonEntry(stores.spaceState));
-  zip.file('stores/chat.json', jsonEntry(stores.chatState));
-  zip.file('stores/collection.json', jsonEntry(stores.collectionState));
-  zip.file('stores/persona.json', jsonEntry(stores.personaState));
-  zip.file(PERSONA_MEMORY_DOC_CONTENT_PATH, jsonEntry(stores.personaMemoryDocContent));
-  zip.file('stores/runtime.json', jsonEntry(stores.runtimeState));
+  zip.file('stores/space.json', new TextEncoder().encode(jsonEntry(stores.spaceState)));
+  zip.file('stores/chat.json', new TextEncoder().encode(jsonEntry(stores.chatState)));
+  zip.file('stores/collection.json', new TextEncoder().encode(jsonEntry(stores.collectionState)));
+  zip.file('stores/persona.json', new TextEncoder().encode(jsonEntry(stores.personaState)));
+  zip.file(PERSONA_MEMORY_DOC_CONTENT_PATH, new TextEncoder().encode(jsonEntry(stores.personaMemoryDocContent)));
+  zip.file('stores/runtime.json', new TextEncoder().encode(jsonEntry(stores.runtimeState)));
 
   const assetIndex: AssetIndexEntry[] = [];
   options.onProgress?.({
@@ -395,8 +397,8 @@ async function createStructuredExportZip(
     }
   };
 
-  zip.file('manifest.json', jsonEntry(manifest));
-  zip.file(ASSET_INDEX_PATH, jsonEntry(assetIndex));
+  zip.file('manifest.json', new TextEncoder().encode(jsonEntry(manifest)));
+  zip.file(ASSET_INDEX_PATH, new TextEncoder().encode(jsonEntry(assetIndex)));
   options.onProgress?.({ message: '准备压缩备份' });
 
   return {

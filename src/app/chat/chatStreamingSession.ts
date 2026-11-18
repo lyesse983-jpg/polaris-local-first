@@ -62,18 +62,19 @@ export function createStreamingSession(args: StreamingSessionArgs) {
     providerName,
     modelTier,
     themeToolMode,
-    ignoredUnknownNativeToolNames = [],
     hasWorkspaceContext = false,
     activeProjectId = null,
     allowCreativeCssRecovery = false,
-    mcpTools = [],
     onFirstProgressFlushed
   } = args;
+  let ignoredUnknownNativeToolNames = args.ignoredUnknownNativeToolNames ?? [];
+  let mcpTools = args.mcpTools ?? [];
   const controller = new AbortController();
   let latestProgress: AssistantReplyProgress | null = null;
   let latestSeenProgress: AssistantReplyProgress | null = null;
   let progressFrameId: number | null = null;
   let progressTimerId: number | null = null;
+  let progressFallbackId: number | null = null;
   let lastProgressFlushAt = 0;
   let hasReceivedFirstProgress = false;
 
@@ -90,6 +91,9 @@ export function createStreamingSession(args: StreamingSessionArgs) {
   };
 
   const flushProgress = () => {
+    if (progressFrameId !== null) window.cancelAnimationFrame(progressFrameId);
+    if (progressFallbackId !== null) window.clearTimeout(progressFallbackId);
+    progressFallbackId = null;
     progressFrameId = null;
     lastProgressFlushAt = Date.now();
     if (!latestProgress) return;
@@ -124,6 +128,8 @@ export function createStreamingSession(args: StreamingSessionArgs) {
   const scheduleProgressFrame = () => {
     if (progressFrameId !== null) return;
     progressFrameId = window.requestAnimationFrame(flushProgress);
+    // Store received text even if the WebView is not granting paint callbacks.
+    progressFallbackId = window.setTimeout(flushProgress, 100);
   };
 
   const queueProgress = (partialReply: AssistantReplyProgress) => {
@@ -181,6 +187,8 @@ export function createStreamingSession(args: StreamingSessionArgs) {
   };
 
   const finish = (preserveLifecycle = false) => {
+    if (progressFallbackId !== null) window.clearTimeout(progressFallbackId);
+    progressFallbackId = null;
     if (progressTimerId !== null) {
       window.clearTimeout(progressTimerId);
       progressTimerId = null;
@@ -200,6 +208,10 @@ export function createStreamingSession(args: StreamingSessionArgs) {
 
   return {
     controller,
+    setToolCatalog: (catalog: { ignoredUnknownNativeToolNames: string[]; mcpTools: McpResolvedToolDefinition[] }) => {
+      ignoredUnknownNativeToolNames = catalog.ignoredUnknownNativeToolNames;
+      mcpTools = catalog.mcpTools;
+    },
     queueProgress,
     commitQueuedProgress,
     getLatestProgress: () => latestProgress ?? latestSeenProgress,

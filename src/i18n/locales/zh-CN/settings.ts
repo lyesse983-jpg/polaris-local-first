@@ -621,6 +621,8 @@ export const settings = {
   'settings.backup.localAvailableNote': '这里管完整备份包的导出和导入，也能恢复 Kelivo zip 备份包。',
   'settings.backup.localUnavailableNote': '当前 App 版请先使用 WebDAV 导出或恢复备份。',
   'settings.backup.exporting': '导出中…',
+  'settings.backup.repairMemoryDocuments': '从备份补回记忆文档',
+  'settings.backup.repairMemoryDocumentsDetail': '请选择含正文的原版备份；只补缺失正文，保留新聊天和设置',
   'settings.backup.exportCurrent': '导出当前完整备份',
   'settings.backup.importing': '导入中…',
   'settings.backup.importFromPackage': '从备份包恢复数据',

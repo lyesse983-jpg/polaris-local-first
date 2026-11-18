@@ -1,10 +1,19 @@
+import { HeartbeatWorkerPanel } from './HeartbeatWorkerPanel';
 import { useEffect, useMemo, useState } from 'react';
 import type { I18nTranslator } from '../../../i18n/translator';
 import { useI18n } from '../../../i18n/useI18n';
 import type { Conversation, Persona, PolarisTriggerRule, PolarisTriggerSchedule } from '../../../types/domain';
 import { Icon } from '../../Icon';
+import {
+  buildAutomationSchedule,
+  defaultOnceInput,
+  earliestOnceInput,
+  isConsumedOnceRule,
+  toLocalDateTimeInput,
+  type AutomationDelivery,
+  type AutomationScheduleMode
+} from './automationHeartbeatForm';
 
-type TriggerFormMode = 'daily' | 'interval';
 type ConversationSelectMode = PolarisTriggerRule['target']['conversationMode'];
 
 export type AutomationRulesPanelProps = {
@@ -23,6 +32,8 @@ export type AutomationRulesPanelProps = {
     conversationId?: string | null;
     schedule: PolarisTriggerSchedule;
     prompt: string;
+    delivery?: AutomationDelivery;
+    autonomous?: boolean;
     name?: string;
   }) => string | null;
   onUpdateTriggerRule: (ruleId: string, patch: Partial<PolarisTriggerRule>) => void;
@@ -33,7 +44,7 @@ export type AutomationRulesPanelProps = {
 };
 
 function formatDateTime(value: number | null, i18n: I18nTranslator) {
-  if (!value) return i18n.t('settings.automation.unscheduled');
+  if (!value || !Number.isFinite(new Date(value).getTime())) return i18n.t('settings.automation.unscheduled');
   return new Intl.DateTimeFormat(i18n.language, {
     month: '2-digit',
     day: '2-digit',
@@ -42,7 +53,11 @@ function formatDateTime(value: number | null, i18n: I18nTranslator) {
   }).format(new Date(value));
 }
 
-function formatSchedule(schedule: PolarisTriggerSchedule, t: I18nTranslator['t']) {
+function formatSchedule(schedule: PolarisTriggerSchedule, i18n: I18nTranslator) {
+  const { t, language } = i18n;
+  if (schedule.kind === 'once') {
+    return `${language === 'en-US' ? 'Once' : '一次性'} · ${formatDateTime(schedule.at, i18n)}`;
+  }
   return schedule.kind === 'daily'
     ? t('settings.automation.scheduleDaily', { time: schedule.time })
     : t('settings.automation.scheduleInterval', { minutes: schedule.everyMinutes });
@@ -72,25 +87,6 @@ function isSelectedConversationTarget(
   optionId: string
 ) {
   return conversationMode === 'fixed' && selectedConversationId === optionId;
-}
-
-function buildSchedule(mode: TriggerFormMode, dailyTime: string, intervalMinutes: string) {
-  if (mode === 'daily') {
-    const trimmedTime = dailyTime.trim();
-    if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(trimmedTime)) return null;
-    const [hour = '0', minute = '00'] = trimmedTime.split(':');
-    return {
-      kind: 'daily' as const,
-      time: `${hour.padStart(2, '0')}:${minute}`
-    };
-  }
-
-  const parsedMinutes = Number(intervalMinutes);
-  if (!Number.isFinite(parsedMinutes) || parsedMinutes < 1) return null;
-  return {
-    kind: 'interval' as const,
-    everyMinutes: Math.floor(parsedMinutes)
-  };
 }
 
 export function AutomationRulesPanel({
@@ -132,7 +128,10 @@ export function AutomationRulesPanel({
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [collaboratorId, setCollaboratorId] = useState(firstPersonaId);
-  const [mode, setMode] = useState<TriggerFormMode>('daily');
+  const [mode, setMode] = useState<AutomationScheduleMode>('once');
+  const [onceAt, setOnceAt] = useState(() => defaultOnceInput());
+  const [delivery, setDelivery] = useState<AutomationDelivery>('message');
+  const [autonomous, setAutonomous] = useState(false);
   const [dailyTime, setDailyTime] = useState('22:30');
   const [intervalMinutes, setIntervalMinutes] = useState('180');
   const [conversationMode, setConversationMode] = useState<ConversationSelectMode>('follow-latest');
@@ -181,7 +180,10 @@ export function AutomationRulesPanel({
     setEditingRuleId(null);
     setName('');
     setCollaboratorId(firstPersonaId);
-    setMode('daily');
+    setMode('once');
+    setOnceAt(defaultOnceInput());
+    setDelivery('message');
+    setAutonomous(false);
     setDailyTime('22:30');
     setIntervalMinutes('180');
     setConversationMode('follow-latest');
@@ -201,7 +203,14 @@ export function AutomationRulesPanel({
     setConversationMode(rule.target.conversationMode === 'fixed' && rule.target.conversationId ? 'fixed' : 'follow-latest');
     setConversationId(rule.target.conversationMode === 'fixed' ? rule.target.conversationId ?? '' : '');
     setPrompt(rule.action.prompt);
-    if (rule.schedule.kind === 'daily') {
+    setDelivery(rule.action.delivery === 'silent' ? 'silent' : 'message');
+    setAutonomous(rule.action.autonomous === true);
+    setOnceAt(rule.schedule.kind === 'once' ? toLocalDateTimeInput(rule.schedule.at) : defaultOnceInput());
+    if (rule.schedule.kind === 'once') {
+      setMode('once');
+      setDailyTime('22:30');
+      setIntervalMinutes('180');
+    } else if (rule.schedule.kind === 'daily') {
       setMode('daily');
       setDailyTime(rule.schedule.time);
       setIntervalMinutes('180');
@@ -219,9 +228,11 @@ export function AutomationRulesPanel({
   };
 
   const submitForm = () => {
-    const schedule = buildSchedule(mode, dailyTime, intervalMinutes);
+    const schedule = buildAutomationSchedule({ mode, dailyTime, intervalMinutes, onceAt });
     if (!schedule) {
-      window.alert(mode === 'daily' ? t('settings.automation.invalidDaily') : t('settings.automation.invalidInterval'));
+      window.alert(mode === 'once'
+        ? (language === 'en-US' ? 'Choose a local time from one minute to 30 days ahead.' : '请选择 1 分钟至 30 天内的一次性唤醒时间。')
+        : mode === 'daily' ? t('settings.automation.invalidDaily') : t('settings.automation.invalidInterval'));
       return;
     }
     const trimmedPrompt = prompt.trim();
@@ -255,8 +266,11 @@ export function AutomationRulesPanel({
           conversationId: conversationMode === 'fixed' ? conversationId : null
         },
         action: {
-          prompt: trimmedPrompt
+          prompt: trimmedPrompt,
+          delivery,
+          autonomous
         },
+        ...(schedule.kind === 'once' ? { enabled: true } : {}),
         lastError: null
       });
       closeForm();
@@ -269,17 +283,26 @@ export function AutomationRulesPanel({
       conversationMode,
       conversationId: conversationMode === 'fixed' ? conversationId : null,
       schedule,
-      prompt: trimmedPrompt
+      prompt: trimmedPrompt,
+      delivery,
+      autonomous
     });
     if (createdId) closeForm();
   };
 
   return (
     <div className={`automation-rules-panel ${lockedCollaboratorId ? 'automation-rules-panel--collaborator' : 'automation-rules-panel--menu'}`}>
+      <HeartbeatWorkerPanel />
       <section className="menu-section automation-form-section automation-rules-head-section">
         <div className="menu-section-head">
           <span className="menu-section-kicker">{t('settings.automation.rulesSection')}</span>
           <p className="menu-section-note">{resolvedRulesNote}</p>
+          <p className="menu-section-note">{language === 'en-US'
+            ? 'Wake-ups continue with the same collaborator, memories and conversation. Enable “Proactive messages” in the toolbox to let the collaborator manage appointments.'
+            : '唤醒会沿用同一位协作者、记忆和聊天记录。开启工具箱里的「主动消息」，协作者才能管理自己的预约。'}</p>
+          <p className="menu-section-note" role="note">{language === 'en-US'
+            ? 'This test version runs model and tool work while the app runtime is active. A scheduled system notification alone does not mean background AI work has run.'
+            : '此测试版需要应用运行环境保持活动，才能执行模型和工具。收到定时系统通知，不代表后台已经运行了 AI。'}</p>
         </div>
         <div className="automation-rules-head-actions">
           {!formOpen ? (
@@ -305,6 +328,9 @@ export function AutomationRulesPanel({
           <div className="automation-rules-help-panel" role="note">
             <strong>{t('settings.automation.helpTitle')}</strong>
             <span>{t('settings.automation.helpDetail')}</span>
+            <span>{language === 'en-US'
+              ? 'A one-time appointment is consumed after it fires. To wake again, the collaborator needs to create or update an appointment. Silent work keeps tool actions and results in the conversation without sending a chat message.'
+              : '一次性预约触发后即结束。下一次醒来需要协作者重新创建或修改预约。安静做事会保留会话里的工具操作和结果，不发送聊天消息。'}</span>
           </div>
         ) : null}
       </section>
@@ -378,15 +404,24 @@ export function AutomationRulesPanel({
                 <span>{t('settings.automation.timeLabel')}</span>
                 <small>{t('settings.automation.required')}</small>
               </span>
-              <div className="mcp-transport-switch">
-                <button type="button" className={mode === 'daily' ? 'active' : ''} onClick={() => setMode('daily')}>
-                  {t('settings.automation.dailyMode')}
-                </button>
-                <button type="button" className={mode === 'interval' ? 'active' : ''} onClick={() => setMode('interval')}>
-                  {t('settings.automation.intervalMode')}
-                </button>
-              </div>
-              {mode === 'daily' ? (
+              <select aria-label={t('settings.automation.timeLabel')} value={mode} onChange={(event) => setMode(event.target.value as AutomationScheduleMode)}>
+                <option value="once">{language === 'en-US' ? 'One-time wake-up' : '一次性唤醒'}</option>
+                <option value="daily">{t('settings.automation.dailyMode')}</option>
+                <option value="interval">{t('settings.automation.intervalMode')}</option>
+              </select>
+              {mode === 'once' ? (
+                <>
+                  <input
+                    className="ps-input"
+                    type="datetime-local"
+                    aria-label={language === 'en-US' ? 'One-time wake-up time' : '一次性唤醒时间'}
+                    min={earliestOnceInput()}
+                    value={onceAt}
+                    onChange={(event) => setOnceAt(event.target.value)}
+                  />
+                  <span className="ps-field-hint">{language === 'en-US' ? 'Device local time · one minute to 30 days ahead.' : '按设备本地时间预约，范围为 1 分钟至 30 天。'}</span>
+                </>
+              ) : mode === 'daily' ? (
                 <input
                   className="ps-input"
                   type="time"
@@ -409,6 +444,34 @@ export function AutomationRulesPanel({
                   <span>{t('settings.automation.minutesUnit')}</span>
                 </div>
               )}
+            </div>
+
+            <label className="automation-field ps-field">
+              <span className="ps-field-label">{language === 'en-US' ? 'When awake' : '醒来之后'}</span>
+              <select value={delivery} onChange={(event) => setDelivery(event.target.value as AutomationDelivery)}>
+                <option value="message">{language === 'en-US' ? 'Start a conversation' : '主动聊天'}</option>
+                <option value="silent">{language === 'en-US' ? 'Work quietly' : '安静做事'}</option>
+              </select>
+              <span className="ps-field-hint">{delivery === 'silent'
+                ? (language === 'en-US' ? 'Keep tool activity and results in this conversation without a chat reply or reply notification.' : '保留本会话里的工具操作和结果，不发送聊天回复或回复通知。')
+                : (language === 'en-US' ? 'The reply appears in the selected conversation.' : '回复会出现在选定的会话中。')}</span>
+            </label>
+
+            <div className="automation-field ps-field">
+              <div className="automation-autonomy-row">
+                <span className="ps-field-label">{language === 'en-US' ? 'Let the collaborator arrange the next wake-up' : '允许协作者自行安排下一次唤醒'}</span>
+                <button
+                  type="button"
+                  role="switch"
+                  className={`ps-toggle-sw automation-autonomy-switch ${autonomous ? 'ps-toggle-sw--on' : ''}`}
+                  aria-checked={autonomous}
+                  aria-label={language === 'en-US' ? 'Let the collaborator arrange the next wake-up' : '允许协作者自行安排下一次唤醒'}
+                  onClick={() => setAutonomous((current) => !current)}
+                ><span className="ps-toggle-knob" /></button>
+              </div>
+              <span className="ps-field-hint">{language === 'en-US'
+                ? 'During this wake-up, the collaborator may choose when to continue, work quietly, or leave no next appointment. This also enables the “Proactive messages” tools; other tool permissions stay as configured.'
+                : '这次醒来时，协作者可以决定何时继续、安静做事，或暂不预约下一次。保存时会同时开启「主动消息」工具，其他工具仍沿用原设置。'}</span>
             </div>
 
             <label className="automation-field ps-field">
@@ -453,7 +516,9 @@ export function AutomationRulesPanel({
                     </div>
                     <div className="automation-rule-badges">
                       <span className={`automation-rule-badge ${rule.enabled ? 'active' : 'inactive'}`}>
-                        {rule.enabled ? t('settings.automation.enabled') : t('settings.automation.disabled')}
+                        {isConsumedOnceRule(rule)
+                          ? (rule.lastError ? (language === 'en-US' ? 'Run failed' : '本次执行失败') : (language === 'en-US' ? 'Appointment fired' : '本次已触发'))
+                          : rule.enabled ? t('settings.automation.enabled') : t('settings.automation.disabled')}
                       </span>
                       {lockedCollaboratorId ? null : (
                         <span className="automation-rule-badge">{resolvePersonaName(personas, rule.target.collaboratorId, t)}</span>
@@ -463,7 +528,11 @@ export function AutomationRulesPanel({
                           ? t('settings.automation.fixedConversation', { title: resolveConversationTitle(conversations, rule.target.conversationId) ?? t('settings.automation.missingConversationTitle') })
                           : t('settings.automation.followLatestBadge')}
                       </span>
-                      <span className="automation-rule-badge">{formatSchedule(rule.schedule, t)}</span>
+                      <span className="automation-rule-badge">{formatSchedule(rule.schedule, i18n)}</span>
+                      <span className="automation-rule-badge">{rule.action.delivery === 'silent'
+                        ? (language === 'en-US' ? 'Quiet work' : '安静做事')
+                        : (language === 'en-US' ? 'Chat reply' : '主动聊天')}</span>
+                      {rule.action.autonomous ? <span className="automation-rule-badge">{language === 'en-US' ? 'Self-scheduled continuation allowed' : '可自主续约'}</span> : null}
                     </div>
                     <p className="automation-rule-prompt">{rule.action.prompt}</p>
                     <div className="automation-rule-meta">
@@ -478,7 +547,13 @@ export function AutomationRulesPanel({
                       className={`ps-toggle-sw ${rule.enabled ? 'ps-toggle-sw--on' : ''}`}
                       aria-label={t('settings.automation.toggleAria', { name: rule.name, status: rule.enabled ? t('settings.automation.enabled') : t('settings.automation.disabled') })}
                       aria-pressed={rule.enabled}
-                      onClick={() => onUpdateTriggerRule(rule.id, { enabled: !rule.enabled })}
+                      onClick={() => {
+                        if (isConsumedOnceRule(rule)) {
+                          openEditForm(rule);
+                          return;
+                        }
+                        onUpdateTriggerRule(rule.id, { enabled: !rule.enabled });
+                      }}
                     >
                       <span className="ps-toggle-knob" />
                     </button>

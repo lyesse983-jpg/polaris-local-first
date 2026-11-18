@@ -158,6 +158,7 @@ export function useChatRuntimeStoreBindings() {
     enqueueTriggerEvent: useRuntimeStore((state) => state.enqueueTriggerEvent),
     consumeTriggerEvent: useRuntimeStore((state) => state.consumeTriggerEvent),
     markTriggerFired: useRuntimeStore((state) => state.markTriggerFired),
+    persistToDb: useRuntimeStore((state) => state.persistToDb),
     markTriggerFailed: useRuntimeStore((state) => state.markTriggerFailed),
     readLatestState: () => {
       const state = useRuntimeStore.getState();

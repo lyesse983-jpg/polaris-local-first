@@ -38,6 +38,28 @@ describe('createChatReplyRunner', () => {
     readConversationMessagesMock.mockResolvedValue([]);
   });
 
+  it('marks preparation as sending immediately and cancels without opening the conversation or waiting for its body read', async () => {
+    let resolveBody!: (body: WritableConversationBody) => void;
+    const pending = new Promise<WritableConversationBody>((resolve) => {resolveBody = resolve;});
+    const controls = { abortControllerRef: {current: null as AbortController | null}, setSending: vi.fn(), setStreaming: vi.fn(), streamingLifecycleReleaseRef: {current: null} };
+    const runner = createChatReplyRunner({
+      ui: { getConversationGenerationControls: () => controls, themeToolModeSwitchRef: {current: null} } as never,
+      store: {chat: {ensureConversationWritable: () => pending}} as never,
+      derived: {} as never, toolActions: {submitAssistantToolActions: vi.fn()} as never
+    });
+    const result = runner({conversationId: 'inactive-conversation', collaboratorId: 'pharos', messages: []});
+    expect(controls.setSending).toHaveBeenCalledWith(true);
+    expect(controls.abortControllerRef.current).not.toBeNull();
+    controls.abortControllerRef.current!.abort();
+    expect(await result).toEqual({status: 'aborted'});
+    expect(controls.setSending).toHaveBeenLastCalledWith(false);
+    expect(controls.abortControllerRef.current).toBeNull();
+    expect(requestReplyMock).not.toHaveBeenCalled();
+    resolveBody(writableConversation('inactive-conversation'));
+    await pending;
+    expect(requestReplyMock).not.toHaveBeenCalled();
+  });
+
   it('builds request snapshots from the latest injected store readers', async () => {
     const ensureConversationTask = vi.fn(() => null);
     const liveMessages: ChatMessage[] = [{

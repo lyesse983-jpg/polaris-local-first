@@ -1,6 +1,6 @@
 .app-reply-notification-stack {
   position: fixed;
-  z-index: 860;
+  z-index: 2500;
   top: max(12px, calc(env(safe-area-inset-top, 0px) + 10px));
   left: max(16px, env(safe-area-inset-left, 0px) + 16px);
   right: max(16px, env(safe-area-inset-right, 0px) + 16px);

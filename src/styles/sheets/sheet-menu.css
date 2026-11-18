@@ -720,6 +720,9 @@
   border: 0;
   padding: 0;
 }
+.automation-autonomy-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.automation-autonomy-row > .ps-field-label { min-width: 0; }
+.automation-autonomy-switch { flex: 0 0 36px; }
 .automation-field-label-row {
   display: flex;
   align-items: center;
@@ -1011,3 +1014,8 @@
     flex: 1 1 88px;
   }
 }
+
+.heartbeat-worker-panel { display: grid; gap: 10px; }
+.heartbeat-worker-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.heartbeat-worker-actions button { border: 1px solid var(--border-color, rgba(127,127,127,.25)); border-radius: 12px; padding: 10px 14px; font: inherit; color: inherit; background: var(--card-bg, rgba(127,127,127,.08)); }
+.heartbeat-worker-actions button:disabled { opacity: .5; }

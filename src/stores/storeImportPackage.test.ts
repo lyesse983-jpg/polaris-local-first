@@ -614,6 +614,85 @@ describe('importStructuredExportPackage', () => {
     expect(installed.commits.map((commit) => commit.domain)).toContain('chat');
   });
 
+  it('recovers every domain after a large chat read stops failing at the native row boundary', async () => {
+    pageLifecycleMocks.flushPageLifecycleHandlers.mockResolvedValue(undefined);
+    vi.stubGlobal('window', { localStorage: createLocalStorageMock() });
+    const installed = createMemoryStoreLocalDataBackend();
+    const read = installed.backend.read.bind(installed.backend);
+    let cursorLimited = true;
+    installed.backend.read = async <T>(key: string) => {
+      const value = await read<T>(key);
+      if (cursorLimited && value !== null && new TextEncoder().encode(JSON.stringify(value)).length > 2 * 1024 * 1024) {
+        throw new Error('SQLiteBlobTooBigException: Row too big to fit into CursorWindow');
+      }
+      return value;
+    };
+    installStoreLocalDataBackend(installed.backend);
+    const content = 'synthetic-large-conversation-'.repeat(110_000);
+    const backup = await buildMinimalImportBlob({ chatState: {
+      conversations: [{
+        id: 'large-import-chat', title: 'Synthetic long conversation', collaboratorId: null,
+        messages: [{ id: 'large-message', role: 'user', content, timestamp: 1 }],
+        pinnedAt: null, updatedAt: 2
+      }],
+      activeConversationId: 'large-import-chat'
+    } });
+    const first = await importStructuredExportPackage(backup);
+    expect(first.status).toBe('partial');
+    expect(first.importedDomains).toEqual(['chat']);
+    expect(first.retainedDomains.filter((entry) => entry.stage === 'domain-commit')).toHaveLength(6);
+    expect((await importStructuredExportPackage(backup)).importedDomains).toEqual([]);
+    // Android instrumentation separately proves scalar reads remove this native boundary.
+    cursorLimited = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const restored = await importStructuredExportPackage(backup);
+      expect(restored.status).toBe('complete');
+      expect(restored.importedDomains).toHaveLength(7);
+      expect(restored.retainedDomains).toEqual([]);
+      const record = installed.values.get('local-data-v1:row:chat:conversationRecord:large-import-chat') as { value?: { messages?: Array<{ content: string }> } };
+      expect(record?.value?.messages?.[0]?.content === content).toBe(true);
+    }
+  });
+
+  it('explicitly restores older collection contents over newer local versions without changing content timestamps', async () => {
+    pageLifecycleMocks.flushPageLifecycleHandlers.mockResolvedValue(undefined);
+    vi.stubGlobal('window', { localStorage: createLocalStorageMock() });
+    const installed = createMemoryStoreLocalDataBackend();
+    installStoreLocalDataBackend(installed.backend);
+    const card = {
+      id: 'shared-bundled-card', title: 'Local card', kind: 'card', language: 'html',
+      code: '<p>newer local content</p>', tags: [], createdAt: 1, updatedAt: 20
+    };
+    expect((await importStructuredExportPackage(await buildMinimalImportBlob({
+      collectionState: { cards: [card] }
+    }))).status).toBe('complete');
+    const backupCard = { ...card, title: 'Restored card', code: '<p>original backup content</p>', updatedAt: 10 };
+    const backup = await buildMinimalImportBlob({ collectionState: { cards: [backupCard] } });
+    const restored = await importStructuredExportPackage(backup);
+    expect(restored.status, JSON.stringify(restored.retainedDomains)).toBe('complete');
+    expect(restored.importedDomains).toHaveLength(7);
+    expect(restored.retainedDomains).toEqual([]);
+    const row = installed.values.get('local-data-v1:row:collection:card:shared-bundled-card') as {
+      updatedAt: number; value: { value: unknown; updatedAt: number }
+    };
+    expect(row.value.value).toEqual(backupCard);
+    expect(row.value.updatedAt).toBe(10);
+    expect(row.updatedAt).toBeGreaterThan(20);
+    expect((await importStructuredExportPackage(backup)).status).toBe('complete');
+    // A write made after this import starts must remain protected: restoring a
+    // backup is not permission to bypass the ordinary stale-write guard.
+    const concurrent = structuredClone(installed.values.get('local-data-v1:row:collection:card:shared-bundled-card')) as typeof row;
+    concurrent.updatedAt = Date.now() + 60_000;
+    concurrent.value.value = { ...backupCard, code: '<p>concurrent edit</p>' };
+    installed.values.set('local-data-v1:row:collection:card:shared-bundled-card', concurrent);
+    const conflict = await importStructuredExportPackage(backup);
+    expect(conflict.status).toBe('partial');
+    expect(conflict.retainedDomains).toContainEqual(expect.objectContaining({
+      domain: 'collection', reason: expect.stringContaining('older than existing complete row')
+    }));
+    expect(installed.values.get('local-data-v1:row:collection:card:shared-bundled-card')).toEqual(concurrent);
+  });
+
   it('rejects structured import when a LocalData domain cannot be restored', async () => {
     pageLifecycleMocks.flushPageLifecycleHandlers.mockResolvedValue(undefined);
     vi.stubGlobal('window', { localStorage: createLocalStorageMock() });
@@ -1108,6 +1187,77 @@ describe('importStructuredExportPackage', () => {
         content: '不要从旧影子里恢复我'
       })
     ]);
+  });
+
+  it('diagnoses a short workspace body and preserves the complete document row and pointer', async () => {
+    pageLifecycleMocks.flushPageLifecycleHandlers.mockResolvedValue(undefined);
+    vi.stubGlobal('window', { localStorage: createLocalStorageMock() });
+    const collection = {
+      workspaceReferenceDocs: [{ id: 'private-doc', projectId: 'project-doc', title: 'Private title',
+        summary: '', content: 'complete document body', charCount: 22, contentLoaded: true,
+        source: 'manual', createdAt: 1, updatedAt: 1 }],
+      roomProjects: [{ id: 'project-doc', title: 'Project', slug: 'project', fileIds: [], tags: [],
+        source: 'manual', createdAt: 1, updatedAt: 1 }]
+    };
+    expect((await importStructuredExportPackage(await buildMinimalImportBlob({ collectionState: collection }))).status).toBe('complete');
+    const key = 'local-data-v1:row:document:workspace-reference-doc:private-doc';
+    const bodyBefore = currentKvValue(key);
+    const pointerBefore = currentKvValue('local-data-v1:pointer:document');
+    const result = await importStructuredExportPackage(await buildMinimalImportBlob({ collectionState: {
+      ...collection, workspaceReferenceDocs: [{ ...collection.workspaceReferenceDocs[0], content: 'short' }]
+    } }));
+    expect(result.status).toBe('partial');
+    expect(result.retainedDomains).toContainEqual({ domain: 'document', stage: 'domain-commit',
+      reason: 'DOCUMENT_BODY_INCOMPLETE missing=0 short=1 memory=0 workspace=1 orphan=0' });
+    expect(currentKvValue(key)).toEqual(bodyBefore);
+    expect(currentKvValue('local-data-v1:pointer:document')).toEqual(pointerBefore);
+  });
+
+  it('round-trips persisted unloaded persona and workspace documents through a new backup', async () => {
+    pageLifecycleMocks.flushPageLifecycleHandlers.mockResolvedValue(undefined);
+    vi.stubGlobal('window', { localStorage: createLocalStorageMock() });
+    const personaBody = '瑞的记忆正文😀\n'.repeat(12000);
+    const workspaceBody = '工作区文档🥺\n'.repeat(12000);
+    const persona = createPersonaTemplate({
+      id: 'persona-roundtrip', name: 'Roundtrip', description: '',
+      memory: { referenceDocs: [{
+        id: 'memory-roundtrip', title: 'Memory', summary: '', content: personaBody,
+        charCount: personaBody.length, contentLoaded: true, source: 'upload', updatedAt: 1
+      }] }
+    });
+    const original = await buildStructuredExportPackage({
+      spaceState: {}, chatState: { conversations: [], activeConversationId: null },
+      collectionState: {
+        cards: [], projectFiles: [], roomProjects: [{ id: 'project-roundtrip', title: 'Project', slug: 'roundtrip', fileIds: [], tags: [], source: 'manual', createdAt: 1, updatedAt: 1 }], imageCards: [], deletedBundledCardIds: [],
+        workspaceReferenceDocs: [{
+          id: 'workspace-roundtrip', projectId: 'project-roundtrip', ownerCollaboratorId: persona.id,
+          title: 'Workspace', summary: '', content: workspaceBody, charCount: workspaceBody.length,
+          contentLoaded: true, source: 'manual', createdAt: 1, updatedAt: 1
+        }]
+      },
+      personaState: { personas: [persona], activeCollaboratorId: persona.id, seededDefaultPersonaIds: [] },
+      runtimeState: normalizeRuntimePayload(null), assetEntries: []
+    });
+    const first = await importStructuredExportPackage(original.blob);
+    expect(first).toMatchObject({ status: 'complete' });
+    // No document has been opened: read catalogs/bodies from the persisted active source.
+    const fresh = await buildStructuredExportPackage({ assetEntries: [] });
+    const zip = await JSZip.loadAsync(await fresh.blob.arrayBuffer());
+    const bodies = JSON.parse(await zip.file(PERSONA_MEMORY_DOC_CONTENT_PATH)!.async('string'));
+    const collection = JSON.parse(await zip.file('stores/collection.json')!.async('string'));
+    expect(bodies.docs['persona-roundtrip:memory-roundtrip']).toBe(personaBody);
+    expect(collection.workspaceReferenceDocs[0].content).toBe(workspaceBody);
+    for (const clean of [true, false]) {
+      if (clean) { kvValues = new Map(); resetStoreLocalDataBackendForTesting(); }
+      const restored = await importStructuredExportPackage(fresh.blob);
+      expect(restored).toMatchObject({ status: 'complete' });
+      const again = await buildStructuredExportPackage({ assetEntries: [] });
+      const againZip = await JSZip.loadAsync(await again.blob.arrayBuffer());
+      expect(JSON.parse(await againZip.file(PERSONA_MEMORY_DOC_CONTENT_PATH)!.async('string')).docs)
+        .toEqual(bodies.docs);
+      expect(JSON.parse(await againZip.file('stores/collection.json')!.async('string')).workspaceReferenceDocs[0].content)
+        .toBe(workspaceBody);
+    }
   });
 
   it('stress round-trips a production-diagnostics-shaped backup into a clean LocalData restore', async () => {

@@ -33,6 +33,8 @@ type PolarisTriggerAlarmNotification = {
 };
 
 type PolarisTriggerAlarmPlugin = {
+  consumeLaunchTrigger(): Promise<{ trigger: unknown }>;
+  addListener(eventName: 'triggerAlarmReceived', listener: (trigger: unknown) => void): Promise<PluginListenerHandle>;
   sync(options: { notifications: PolarisTriggerAlarmNotification[] }): Promise<{ exactAlarm: 'granted' | 'denied' }>;
   checkExactAlarmSetting(): Promise<{ exactAlarm: 'granted' | 'denied' }>;
   openExactAlarmSettings(): Promise<{ exactAlarm: 'granted' | 'denied' }>;
@@ -97,14 +99,14 @@ export function buildNativeTriggerNotifications(
   now = Date.now()
 ): LocalNotificationSchema[] {
   return rules.flatMap((rule) => {
-    if (!rule.enabled || !rule.nextRunAt || rule.nextRunAt <= now) return [];
+    if (!rule.enabled || !rule.nextRunAt || rule.nextRunAt <= now || rule.action.delivery === 'silent') return [];
     const persona = personas.find((entry) => entry.id === rule.target.collaboratorId);
     if (!persona) return [];
 
     return [{
       id: resolveTriggerNotificationId(rule.id),
-      title: `${persona.name} 想找你`,
-      body: rule.name,
+      title: `${persona.name} · 心跳预约`,
+      body: `${rule.name} · 预约到点；请保持 Polaris 运行，回复会另行通知`,
       schedule: {
         at: new Date(rule.nextRunAt),
         allowWhileIdle: true
@@ -212,6 +214,7 @@ async function ensureProactiveReplyNotificationChannel() {
 function hasEnabledNativeTriggerRule(rules: PolarisTriggerRule[], personas: Persona[]) {
   return rules.some((rule) =>
     rule.enabled
+    && rule.action.delivery !== 'silent'
     && rule.nextRunAt !== null
     && personas.some((entry) => entry.id === rule.target.collaboratorId)
   );
@@ -320,13 +323,67 @@ export async function postNativeProactiveReplyNotification(input: {
   }
 }
 
+export function extractAndroidTriggerAlarmTap(value: unknown): NativeTriggerNotificationTap | null {
+  if (!value || typeof value !== 'object') return null;
+  const input = value as Partial<NativeTriggerNotificationTap>;
+  return typeof input.ruleId === 'string' && input.ruleId.trim().length > 0
+    && typeof input.scheduledFor === 'number' && Number.isFinite(input.scheduledFor) && input.scheduledFor > 0
+    ? { ruleId: input.ruleId, scheduledFor: input.scheduledFor }
+    : null;
+}
+
 export async function registerNativeTriggerNotificationTapListener(
   onTap: (tap: NativeTriggerNotificationTap) => void
 ): Promise<PluginListenerHandle | null> {
   if (!canUseLocalNotifications()) return null;
+  const handles: PluginListenerHandle[] = [];
+  const seen = new Set<string>();
+  const deliver = (tap: NativeTriggerNotificationTap | null) => {
+    if (!tap) return;
+    const key = `${tap.ruleId}:${tap.scheduledFor}`;
+    if (seen.has(key)) return;
+    if (seen.size >= 256) seen.clear();
+    seen.add(key);
+    onTap(tap);
+  };
+  try {
+    handles.push(await LocalNotifications.addListener('localNotificationActionPerformed', (action) => {
+      deliver(extractNativeTriggerNotificationTap(action));
+    }));
+    if (canUseAndroidTriggerAlarm()) {
+      handles.push(await PolarisTriggerAlarm.addListener('triggerAlarmReceived', (value) => {
+        deliver(extractAndroidTriggerAlarmTap(value));
+      }));
+      const initial = await PolarisTriggerAlarm.consumeLaunchTrigger();
+      deliver(extractAndroidTriggerAlarmTap(initial.trigger));
+    }
+    return { remove: async () => { await Promise.all(handles.map((handle) => handle.remove())); } };
+  } catch {
+    await Promise.all(handles.map((handle) => handle.remove()));
+    return null;
+  }
+}
 
-  return LocalNotifications.addListener('localNotificationActionPerformed', (action) => {
-    const tap = extractNativeTriggerNotificationTap(action);
-    if (tap) onTap(tap);
-  });
+
+export type NativeReplyNotificationTap = { conversationId: string; collaboratorId: string };
+
+export function extractNativeReplyNotificationTap(value: unknown): NativeReplyNotificationTap | null {
+  if (!value || typeof value !== 'object') return null;
+  const input = value as Partial<NativeProactiveReplyNotificationExtra>;
+  return input.polarisKind === POLARIS_PROACTIVE_REPLY_NOTIFICATION_KIND
+    && typeof input.conversationId === 'string' && input.conversationId.trim().length > 0
+    && typeof input.collaboratorId === 'string' && input.collaboratorId.trim().length > 0
+    ? { conversationId: input.conversationId, collaboratorId: input.collaboratorId } : null;
+}
+
+export async function registerNativeReplyNotificationTapListener(
+  onTap: (tap: NativeReplyNotificationTap) => void
+): Promise<PluginListenerHandle | null> {
+  if (!canUseLocalNotifications()) return null;
+  try {
+    return await LocalNotifications.addListener('localNotificationActionPerformed', (action) => {
+      const tap = extractNativeReplyNotificationTap(action?.notification?.extra);
+      if (tap) onTap(tap);
+    });
+  } catch { return null; }
 }

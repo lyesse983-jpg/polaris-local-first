@@ -72,6 +72,8 @@ export type McpToolCallResult =
     };
 
 const mcpToolCatalogCache = new Map<string, McpToolCatalogCacheEntry>();
+const catalogRequests = new Map<string, Promise<{ tools: McpResolvedToolDefinition[]; error: string | null }>>();
+let catalogCacheEpoch = 0;
 
 function normalizeToolNameFragment(value: string) {
   return value
@@ -301,6 +303,8 @@ function buildMcpCatalogCacheKey(server: McpServerConfig) {
   return JSON.stringify({
     id: server.id,
     handle: server.handle,
+    name: server.name,
+    tools: server.tools,
     transport: server.transport,
     url: server.url,
     headers: server.headers.map((header) => [header.key, header.value])
@@ -317,7 +321,7 @@ async function listServerTools(
     : await listToolsViaStreamableHttp({ ...options, server }, catalogOptions);
 }
 
-async function resolveServerToolsWithRetry(args: {
+async function discoverServerToolsWithRetry(args: {
   server: McpServerConfig;
   timeoutMs: number;
   fetchImpl?: typeof fetch;
@@ -326,6 +330,7 @@ async function resolveServerToolsWithRetry(args: {
   includeDisabledTools: boolean;
 }) {
   const cacheKey = buildMcpCatalogCacheKey(args.server);
+  const epoch = catalogCacheEpoch;
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt <= args.retryDelaysMs.length; attempt += 1) {
@@ -334,9 +339,9 @@ async function resolveServerToolsWithRetry(args: {
         timeoutMs: args.timeoutMs,
         fetchImpl: args.fetchImpl
       }, {
-        includeDisabledTools: args.includeDisabledTools
+        includeDisabledTools: true
       });
-      mcpToolCatalogCache.set(cacheKey, {
+      if (epoch === catalogCacheEpoch) mcpToolCatalogCache.set(cacheKey, {
         tools,
         updatedAt: Date.now()
       });
@@ -366,6 +371,29 @@ async function resolveServerToolsWithRetry(args: {
   };
 }
 
+type CatalogRequestArgs = Parameters<typeof discoverServerToolsWithRetry>[0] & { maxCacheAgeMs: number };
+
+async function resolveServerToolsWithRetry(args: CatalogRequestArgs) {
+  const cacheKey = buildMcpCatalogCacheKey(args.server);
+  const cached = mcpToolCatalogCache.get(cacheKey);
+  const age = cached ? Date.now() - cached.updatedAt : Infinity;
+  if (args.maxCacheAgeMs > 0 && age >= 0 && age < args.maxCacheAgeMs && cached) {
+    return { tools: args.includeDisabledTools ? cached.tools : cached.tools.filter((tool) => tool.enabled !== false), error: null };
+  }
+  const requestKey = JSON.stringify([cacheKey, args.timeoutMs, args.retryDelaysMs, args.useCachedOnFailure]);
+  let pending = catalogRequests.get(requestKey);
+  if (!pending) {
+    pending = discoverServerToolsWithRetry({ ...args, includeDisabledTools: true });
+    catalogRequests.set(requestKey, pending);
+  }
+  try {
+    const result = await pending;
+    return { ...result, tools: args.includeDisabledTools ? result.tools : result.tools.filter((tool) => tool.enabled !== false) };
+  } finally {
+    if (catalogRequests.get(requestKey) === pending) catalogRequests.delete(requestKey);
+  }
+}
+
 export async function resolveMcpToolCatalog(args: {
   servers?: McpServerConfig[];
   timeoutSeconds?: number;
@@ -373,6 +401,8 @@ export async function resolveMcpToolCatalog(args: {
   retryDelaysMs?: readonly number[];
   useCachedOnFailure?: boolean;
   includeDisabledTools?: boolean;
+  /** Opt-in reuse for ordinary replies; explicit catalog refreshes remain fresh by default. */
+  maxCacheAgeMs?: number;
 }): Promise<McpToolCatalogResolution> {
   const activeServers = (args.servers ?? []).filter((server) => server.isActive && server.url.trim());
   if (!activeServers.length) {
@@ -392,7 +422,8 @@ export async function resolveMcpToolCatalog(args: {
         fetchImpl: args.fetchImpl,
         retryDelaysMs,
         useCachedOnFailure: args.useCachedOnFailure !== false,
-        includeDisabledTools: args.includeDisabledTools === true
+        includeDisabledTools: args.includeDisabledTools === true,
+        maxCacheAgeMs: Number.isFinite(args.maxCacheAgeMs) ? Math.max(0, args.maxCacheAgeMs!) : 0
       })
     )
   );
@@ -404,7 +435,9 @@ export async function resolveMcpToolCatalog(args: {
 }
 
 export function clearMcpToolCatalogCacheForTests() {
+  catalogCacheEpoch += 1;
   mcpToolCatalogCache.clear();
+  catalogRequests.clear();
 }
 
 export async function invokeMcpTool(args: {

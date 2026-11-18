@@ -26,6 +26,24 @@ const DEFAULT_TRIGGER_NAME = '主动消息';
 const DEFAULT_DAILY_TIME = '09:00';
 const DEFAULT_INTERVAL_MINUTES = 60;
 
+export const MIN_ONCE_TRIGGER_DELAY_MS = 60_000;
+export const MAX_ONCE_TRIGGER_DELAY_MS = 30 * 24 * 60 * 60_000;
+
+function isValidOnceTime(at: unknown): at is number {
+  return typeof at === 'number' && Number.isFinite(at) && at > 0
+    && Number.isFinite(new Date(at).getTime());
+}
+
+/** New model appointments are bounded. Persisted overdue appointments stay readable. */
+export function getOnceTriggerScheduleIssue(schedule: PolarisTriggerSchedule, now = Date.now()): string | null {
+  if (schedule.kind !== 'once') return null;
+  if (!isValidOnceTime(schedule.at)) return '一次性预约需要有效的 at（毫秒时间戳）。';
+  const delay = schedule.at - now;
+  return delay < MIN_ONCE_TRIGGER_DELAY_MS - 1_000 || delay > MAX_ONCE_TRIGGER_DELAY_MS
+    ? '一次性预约需要安排在 1 分钟至 30 天之后。'
+    : null;
+}
+
 function parseDailyTime(value: string) {
   const match = value.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
   if (!match) return null;
@@ -49,6 +67,10 @@ function normalizeIntervalMinutes(value: unknown) {
 }
 
 export function normalizeTriggerSchedule(schedule?: Partial<PolarisTriggerSchedule> | null): PolarisTriggerSchedule {
+  if (schedule?.kind === 'once') {
+    // Keep invalid once records recognizable and disabled, rather than inventing a daily rule.
+    return { kind: 'once', at: isValidOnceTime(schedule.at) ? schedule.at : 0 };
+  }
   if (schedule?.kind === 'interval') {
     return {
       kind: 'interval',
@@ -63,6 +85,10 @@ export function normalizeTriggerSchedule(schedule?: Partial<PolarisTriggerSchedu
 }
 
 export function resolveNextTriggerRunAt(schedule: PolarisTriggerSchedule, fromMs = Date.now()) {
+  if (schedule.kind === 'once') {
+    if (!isValidOnceTime(schedule.at)) throw new Error('一次性预约时间无效。');
+    return schedule.at;
+  }
   if (schedule.kind === 'interval') {
     return fromMs + normalizeIntervalMinutes(schedule.everyMinutes) * 60_000;
   }
@@ -117,13 +143,18 @@ function normalizeTriggerTarget(target?: Partial<PolarisTriggerTarget> | null): 
 
 function normalizeTriggerAction(action?: Partial<PolarisTriggerAction> | null): PolarisTriggerAction {
   return {
-    prompt: action?.prompt?.trim() || ''
+    prompt: action?.prompt?.trim() || '',
+    ...(action?.delivery === 'message' || action?.delivery === 'silent' ? { delivery: action.delivery } : {}),
+    ...(typeof action?.autonomous === 'boolean' ? { autonomous: action.autonomous } : {})
   };
 }
 
 export function createScheduledTriggerRule(input: CreateScheduledTriggerRuleInput): PolarisTriggerRule {
   const now = input.now ?? Date.now();
   const schedule = normalizeTriggerSchedule(input.schedule);
+  if (schedule.kind === 'once' && !isValidOnceTime(schedule.at)) {
+    throw new Error('一次性预约时间无效。');
+  }
   return {
     id: createUid('trigger'),
     name: input.name?.trim() || DEFAULT_TRIGGER_NAME,
@@ -149,14 +180,20 @@ export function normalizeTriggerRule(rule: PersistedTriggerRuleInput | null | un
   const now = Date.now();
   const schedule = normalizeTriggerSchedule(rule?.schedule);
   const createdAt = typeof rule?.createdAt === 'number' ? rule.createdAt : now;
-  const nextRunAt = typeof rule?.nextRunAt === 'number'
-    ? rule.nextRunAt
-    : resolveNextTriggerRunAt(schedule, now);
+  const invalidOnce = schedule.kind === 'once' && !isValidOnceTime(schedule.at);
+  const invalidNextRun = typeof rule?.nextRunAt === 'number' && !Number.isFinite(rule.nextRunAt);
+  const completedOnce = schedule.kind === 'once' && typeof rule?.lastRunAt === 'number'
+    && (rule.nextRunAt === null || rule.nextRunAt === undefined);
+  const nextRunAt = invalidOnce || invalidNextRun || completedOnce || rule?.nextRunAt === null
+    ? null
+    : typeof rule?.nextRunAt === 'number'
+      ? rule.nextRunAt
+      : resolveNextTriggerRunAt(schedule, now);
 
   return {
     id: rule?.id?.trim() || createUid('trigger'),
     name: rule?.name?.trim() || DEFAULT_TRIGGER_NAME,
-    enabled: rule?.enabled !== false,
+    enabled: !invalidOnce && !invalidNextRun && !completedOnce && rule?.enabled !== false,
     source: normalizeTriggerSource(rule?.source),
     webhookSecret: normalizeWebhookSecret(rule?.webhookSecret),
     schedule,
@@ -166,7 +203,10 @@ export function normalizeTriggerRule(rule: PersistedTriggerRuleInput | null | un
     updatedAt: typeof rule?.updatedAt === 'number' ? rule.updatedAt : createdAt,
     lastRunAt: typeof rule?.lastRunAt === 'number' ? rule.lastRunAt : null,
     nextRunAt,
-    lastError: rule?.lastError?.trim() || null
+    lastError: invalidOnce || invalidNextRun ? '一次性预约时间无效，请重新设置。' : rule?.lastError?.trim() || null,
+    ...(Array.isArray(rule?.runHistory) ? {
+      runHistory: rule.runHistory.filter((time): time is number => typeof time === 'number' && Number.isFinite(time) && time >= 0).slice(-128)
+    } : {})
   };
 }
 
@@ -186,15 +226,26 @@ export function advanceTriggerRuleAfterRun(rule: PolarisTriggerRule, runAt = Dat
   return {
     ...rule,
     lastRunAt: runAt,
-    nextRunAt: resolveNextTriggerRunAt(rule.schedule, runAt),
+    runHistory: [...(rule.runHistory ?? []).filter((time) => Number.isFinite(time)
+      && time >= runAt - 24 * 60 * 60_000 && time <= runAt), runAt].slice(-128),
+    enabled: rule.schedule.kind === 'once' ? false : rule.enabled,
+    nextRunAt: rule.schedule.kind === 'once' ? null : resolveNextTriggerRunAt(rule.schedule, runAt),
     updatedAt: runAt,
     lastError: null
   };
 }
 
 export function markTriggerRuleError(rule: PolarisTriggerRule, error: string, now = Date.now()): PolarisTriggerRule {
+  // A run claims/advances before calling the model. A failure must not consume a newly
+  // selected appointment or count as another actual start.
+  const alreadyClaimed = rule.lastRunAt !== null
+    && (rule.nextRunAt === null || rule.nextRunAt > now);
+  const next = alreadyClaimed ? rule : advanceTriggerRuleAfterRun(rule, now);
+  const { runHistory: _advancedHistory, ...withoutHistory } = next;
   return {
-    ...advanceTriggerRuleAfterRun(rule, now),
+    ...withoutHistory,
+    ...(rule.runHistory ? { runHistory: rule.runHistory } : {}),
+    updatedAt: now,
     lastError: error.trim() || '触发失败'
   };
 }

@@ -1,0 +1,112 @@
+name: Android heartbeat test APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'codex/polaris-heartbeat*'
+      - 'heartbeat/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-heartbeat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      POLARIS_HEARTBEAT_DEBUG_KEYSTORE: ${{ github.workspace }}/.heartbeat-signing/debug.keystore
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Verify heartbeat contracts
+        run: >-
+          npx vitest run
+          src/engines/triggers.test.ts
+          src/stores/runtimeStoreTriggers.test.ts
+          src/app/chat/triggerMessage.test.ts
+          src/app/chat/triggerConversationResolution.test.ts
+          src/native/localTriggerNotifications.test.ts
+          src/app/chat/heartbeatScheduling.test.ts
+          src/engines/mcpRuntime.test.ts
+          src/app/chat/chatReplyRuntime.test.ts
+          src/app/chat/chatReplyFlow.test.ts
+          src/app/chat/chatStreamingSession.test.ts
+          src/app/chat/triggerOffscreenExecution.test.ts
+          src/app/chat/heartbeatExecutor.test.ts
+          src/native/heartbeatWorker.test.ts
+          src/app/chat/proactiveReplyNotification.test.ts
+          src/app/chat/proactiveReplyPublisher.test.ts
+          src/app/chat/silentTriggerChatPort.test.ts
+          src/ui/shell/menu/automationHeartbeatForm.test.ts
+          src/engines/tool-protocol/heartbeatScheduleParser.test.ts
+          src/ui/worlds/chat/message/MessageParagraphBubbles.test.tsx
+      - name: Typecheck and build web assets
+        run: npm run build
+      - name: Sync Android plugins and assets
+        run: npx cap sync android
+      - name: Prepare Android SDK
+        run: >-
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+      - name: Preserve test signing key between builds
+        uses: actions/cache@v4
+        with:
+          path: .heartbeat-signing/debug.keystore
+          key: polaris-heartbeat-debug-signing-v2
+      - name: Prepare dedicated test signing key
+        run: |
+          mkdir -p "$(dirname "$POLARIS_HEARTBEAT_DEBUG_KEYSTORE")"
+          if [ ! -f "$POLARIS_HEARTBEAT_DEBUG_KEYSTORE" ]; then
+            keytool -genkeypair -noprompt -keystore "$POLARIS_HEARTBEAT_DEBUG_KEYSTORE" -storepass android -keypass android -alias androiddebugkey -dname "CN=Polaris Heartbeat Test,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
+          fi
+          test -s "$POLARIS_HEARTBEAT_DEBUG_KEYSTORE"
+      - name: Verify persistence and import contracts
+        run: npm run test:data-boundary && npx vitest run src/stores/storeImportPackage.test.ts src/stores/storeImportResult.test.ts src/stores/storeImportDiagnostics.test.ts src/stores/storeExportPackage.test.ts src/native/systemBackupFiles.test.ts src/app/shell/completeBackupExport.test.ts src/stores/repairMemoryDocuments.test.ts
+      - name: Build separately installable test APK
+        run: bash scripts/build-heartbeat-android.sh --prepared
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run Android SQLite regression on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: default
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: bash android/gradlew -p android :app:connectedDebugAndroidTest --no-daemon --stacktrace
+      - name: Upload Android regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-sqlite-regression-${{ github.sha }}
+          path: android/app/build/outputs/androidTest-results/connected/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload APK and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: polaris-heartbeat-debug-${{ github.sha }}
+          path: |
+            artifacts/polaris-heartbeat-debug.apk
+            artifacts/polaris-heartbeat-debug.apk.sha256
+          if-no-files-found: error
+          retention-days: 14

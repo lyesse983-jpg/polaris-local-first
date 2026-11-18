@@ -21,6 +21,7 @@ import { useChatStore } from '../../stores/chatStore';
 import { useCollectionStore } from '../../stores/collectionStore';
 import { loadWorkspaceReferenceDocsContent } from '../../stores/workspaceReferenceDocContentPersistence';
 import { usePersonaStore } from '../../stores/personaStore';
+import { loadPersonaMemoryReferenceDocsContent } from '../../stores/personaMemoryReferenceDocPersistence';
 import { serializePersistedSpaceState } from '../../stores/spaceStorePersistence';
 import { useRuntimeStore } from '../../stores/runtimeStore';
 import type { RuntimePayload } from '../../stores/runtimeStorePersistence';
@@ -97,17 +98,16 @@ export function buildCurrentExportSnapshot(): StructuredExportSnapshot {
 export async function prepareCompleteExportSnapshot() {
   await useChatStore.getState().persistToDb();
   const snapshot = buildCurrentExportSnapshot();
-  const collectionState = snapshot.collectionState;
-  if (!collectionState) return snapshot;
-
+  const [personas, workspaceReferenceDocs] = await Promise.all([
+    snapshot.personaState ? loadPersonaMemoryReferenceDocsContent(snapshot.personaState.personas) : undefined,
+    snapshot.collectionState ? loadWorkspaceReferenceDocsContent(snapshot.collectionState.workspaceReferenceDocs) : undefined
+  ]);
   return {
     ...snapshot,
-    collectionState: {
-      ...collectionState,
-      workspaceReferenceDocs: await loadWorkspaceReferenceDocsContent(
-        collectionState.workspaceReferenceDocs
-      )
-    }
+    ...(snapshot.personaState && personas ? { personaState: { ...snapshot.personaState, personas } } : {}),
+    ...(snapshot.collectionState && workspaceReferenceDocs ? {
+      collectionState: { ...snapshot.collectionState, workspaceReferenceDocs }
+    } : {})
   };
 }
 

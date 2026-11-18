@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { syncNativeHeartbeatAppointments } from '../../native/heartbeatWorker';
+import { useEffect, useMemo } from 'react';
 import { useChatDerived } from '../chat/chatDerivedState';
 import { createChatReplyRunner } from '../chat/chatReplyFlow';
 import { createChatToolActions } from '../chat/chatToolActions';
@@ -13,6 +14,7 @@ import { useChatTriggerRuntime } from '../chat/useChatTriggerRuntime';
 import { useAppTriggerShortcutRuntime } from './useAppTriggerShortcutRuntime';
 import { useNativeTriggerNotifications } from './useNativeTriggerNotifications';
 import { selectChatConversations } from '../chat/liveConversationCatalog';
+import { createTriggerChatPort } from '../chat/silentTriggerChatPort';
 
 type TriggerConversationGenerationState = {
   sending: boolean;
@@ -48,6 +50,9 @@ export function useAppTriggerRuntime({ chatRuntime, startupReady }: UseAppTrigge
     && store.persona.hydrated
     && store.runtime.hydrated
     && store.collection.hydrated;
+  useEffect(() => {
+    if (triggerRuntimeReady) void syncNativeHeartbeatAppointments(store.runtime.triggerRules).catch(() => chatRuntime.setCommandStatus('后台预约同步失败，前台心跳仍可使用。', true));
+  }, [triggerRuntimeReady, store.runtime.triggerRules]);
   const liveConversations = selectChatConversations(store.chat.conversations);
 
   const derived = useChatDerived({
@@ -79,18 +84,27 @@ export function useAppTriggerRuntime({ chatRuntime, startupReady }: UseAppTrigge
     () => createChatToolActions({ ui: chatRuntime, store: toolStore, derived }),
     [chatRuntime, derived, toolStore]
   );
-  const runReply = createChatReplyRunner({
+  const makeRunner = (silent: boolean) => createChatReplyRunner({
     ui: {
       themeToolModeSwitchRef: chatRuntime.themeToolModeSwitchRef,
-      getConversationGenerationControls: chatRuntime.getConversationGenerationControls,
+      getConversationGenerationControls: (key) => {
+        const controls = chatRuntime.getConversationGenerationControls(key);
+        return silent ? { ...controls, setStreaming: () => undefined } : controls;
+      },
       toolPromptPreferences: store.runtime.toolPromptPreferences,
       taskModeEnabled: store.runtime.taskModeEnabled
     },
     store: replyStore,
+    overrideReplyChatPort: (chat) => createTriggerChatPort(chat, silent),
     derived,
     toolActions,
     createToolActions: (scopedDerived) => createChatToolActions({ ui: chatRuntime, store: toolStore, derived: scopedDerived })
   });
+
+  const messageRunner = makeRunner(false);
+  const silentRunner = makeRunner(true);
+  const runReply = (params: Parameters<typeof messageRunner>[0] & { silent?: boolean }) =>
+    (params.silent ? silentRunner : messageRunner)(params);
 
   useChatTriggerRuntime({
     startupReady: triggerRuntimeReady,

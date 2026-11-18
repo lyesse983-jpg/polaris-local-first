@@ -339,6 +339,7 @@ export function useMenuSheetController({
     onImportFontBrowserFileSelected: fontLibrary.onImportFontBrowserFileSelected,
     onExportData: backupTransfer.onExportData,
     onImportData: backupTransfer.onImportData,
+    onRepairMemoryDocuments: backupTransfer.onRepairMemoryDocuments,
     onExportToWebDav: backupTransfer.onExportToWebDav,
     onImportFromWebDav: backupTransfer.onImportFromWebDav
   };

@@ -57,6 +57,60 @@ describe('mcpRuntime', () => {
     vi.unstubAllGlobals();
   });
 
+  function catalogFetch(onList?: () => Promise<void>) {
+    return vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      if (body?.method === 'initialize') return createJsonResponse({ jsonrpc: '2.0', id: body.id,
+        result: { protocolVersion: '2025-03-26', capabilities: { tools: {} } } }, { headers: { 'Mcp-Session-Id': 'catalog-test' } });
+      if (body?.method === 'notifications/initialized') return new Response(null, { status: 202 });
+      if (body?.method === 'tools/list') {
+        await onList?.();
+        return createJsonResponse({jsonrpc: '2.0', id: body.id, result: { tools: [{name: 'read_notes', description: 'Read notes'}] }});
+      }
+      if (init?.method === 'DELETE') return new Response(null, {status: 204});
+      throw new Error('Unexpected request');
+    });
+  }
+
+  it('reuses a recent catalog but honors expiry, explicit refresh, credentials and tool visibility changes', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1000);
+    const fetchImpl = catalogFetch();
+    let lists = 0;
+    const listCount = () => fetchImpl.mock.calls.filter(([, init]) => init?.body && JSON.parse(String(init.body)).method === 'tools/list').length;
+    let server = createServer();
+    const args = () => ({ servers: [server], fetchImpl: fetchImpl as typeof fetch, retryDelaysMs: [], maxCacheAgeMs: 60_000 });
+    try {
+      expect((await resolveMcpToolCatalog(args())).tools).toHaveLength(1);
+      lists = listCount();
+      expect((await resolveMcpToolCatalog(args())).tools).toHaveLength(1);
+      expect(listCount()).toBe(lists);
+      clock.mockReturnValue(61_000);
+      await resolveMcpToolCatalog(args()); expect(listCount()).toBe(++lists);
+      await resolveMcpToolCatalog({ ...args(), maxCacheAgeMs: 0 }); expect(listCount()).toBe(++lists);
+      server = { ...server, headers: [{ id: 'test-header', key: 'Authorization', value: 'synthetic-only' }] };
+      await resolveMcpToolCatalog(args()); expect(listCount()).toBe(++lists);
+      server = { ...server, tools: [{name: 'read_notes', description: '', inputSchema: {}, enabled: false}] };
+      expect((await resolveMcpToolCatalog(args())).tools).toEqual([]); expect(listCount()).toBe(++lists);
+      expect((await resolveMcpToolCatalog({ ...args(), includeDisabledTools: true })).tools[0].enabled).toBe(false);
+      expect(listCount()).toBe(lists);
+      expect((await resolveMcpToolCatalog({ ...args(), servers: [{ ...server, isActive: false }] })).tools).toEqual([]);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('shares one in-flight discovery between heartbeat and chat catalog callers', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const fetchImpl = catalogFetch(() => gate);
+    const args = { servers: [createServer()], fetchImpl: fetchImpl as typeof fetch, retryDelaysMs: [] };
+    const first = resolveMcpToolCatalog({ ...args, includeDisabledTools: true });
+    const second = resolveMcpToolCatalog({ ...args, maxCacheAgeMs: 60_000 });
+    await vi.waitFor(() => expect(fetchImpl.mock.calls.some(([, init]) => init?.body && JSON.parse(String(init.body)).method === 'tools/list')).toBe(true));
+    release();
+    const results = await Promise.all([first, second]);
+    expect(results[0].tools).toEqual(results[1].tools);
+    expect(fetchImpl.mock.calls.filter(([, init]) => init?.body && JSON.parse(String(init.body)).method === 'initialize')).toHaveLength(1);
+  });
+
   it('lists streamable-http MCP tools into Polaris tool definitions', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const body = init?.body ? JSON.parse(String(init.body)) : null;

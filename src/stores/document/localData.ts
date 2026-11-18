@@ -181,6 +181,46 @@ export async function commitDocumentRowChangesActivating(args: {
   });
 }
 
+/** Explicit repair only: fill absent body rows, never replace a complete or deleted row.
+ * The verified backup seeds are checked again inside the shared document queue. */
+export async function restoreMissingDocumentBodies(args: {
+  seeds: DocumentObjectSeed[];
+  isStillExpected: (seed: DocumentObjectSeed) => boolean;
+}): Promise<string[]> {
+  return runExclusiveDocumentPersistenceCommit(async () => {
+    const alreadyActive = await isLocalDataRepositoryDomainActive('document');
+    if (!alreadyActive && await hasLegacyDocumentBodyChunkedKvKeys()) {
+      throw new Error('当前仍有旧格式文档正文，请保留备份，暂不执行补回。');
+    }
+    const repository = createStoreLocalDataRepository();
+    if (!alreadyActive) {
+      for (const ref of await discoverLocalDataDomainRefs('document')) {
+        const row = await repository.read(ref);
+        if (row.status !== 'complete' && row.status !== 'deleted') {
+          throw new Error('现有文档尚未完整读出，未执行补回。');
+        }
+      }
+    }
+    const seeds: DocumentObjectSeed[] = [];
+    const ids = new Set<string>();
+    for (const seed of args.seeds) {
+      if (ids.has(seed.id) || documentObjectIncompleteReason(seed)) throw new Error('补回文档校验失败，未写入。');
+      ids.add(seed.id);
+      if (!args.isStillExpected(seed)) continue;
+      const current = await repository.read(getDocumentObjectLocalDataRef(seed.kind, seed.id));
+      if (current.status === 'incomplete') {
+        if (current.reason !== MISSING_ROW_REASON) throw new Error('现有文档未完整读出，未执行补回。');
+        seeds.push(seed);
+      }
+    }
+    const unchanged = seeds.filter(args.isStillExpected);
+    if (!unchanged.length) return [];
+    const meta = await commitDocumentRowChanges({ changes: unchanged.map((seed) => ({ type: 'upsert', seed })) });
+    if (!alreadyActive) await repository.activateDomainsFromCommittedRows([meta]);
+    return unchanged.map((seed) => seed.id);
+  });
+}
+
 type DocumentMetaContribution = {
   kind: DocumentLocalDataObjectKind;
   active: boolean;

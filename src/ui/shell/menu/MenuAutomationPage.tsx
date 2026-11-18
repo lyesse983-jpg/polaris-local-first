@@ -14,6 +14,8 @@ type MenuAutomationPageProps = {
     conversationId?: string | null;
     schedule: PolarisTriggerSchedule;
     prompt: string;
+    delivery?: 'message' | 'silent';
+    autonomous?: boolean;
     name?: string;
   }) => string | null;
   onUpdateTriggerRule: (ruleId: string, patch: Partial<PolarisTriggerRule>) => void;

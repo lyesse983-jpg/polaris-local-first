@@ -18,6 +18,31 @@ describe('buildReplyPreview', () => {
   it('collapses whitespace and keeps a compact preview', () => {
     expect(buildReplyPreview('  第一行\n\n第二行   还在这里  ')).toBe('第一行 第二行 还在这里');
   });
+
+  it('omits projected execution code before shortening the preview and preserves surrounding prose', () => {
+    const content = [
+      '这句才是给你看的。',
+      '```js',
+      "await fetch('https://push.example.test', {method: 'POST', body: 'synthetic-only'});",
+      '// synthetic execution details '.repeat(30),
+      '```',
+      '后面这句也要留下。',
+      '```json',
+      '{"syntheticResult":true}',
+      '```'
+    ].join('\n');
+    expect(buildReplyPreview(content)).toBe('这句才是给你看的。 后面这句也要留下。');
+    expect(content).toContain('await fetch');
+  });
+
+  it('leaves no preview for code-only messages', () => {
+    expect(buildReplyPreview('```js\nawait runSyntheticTool();\n```')).toBe('');
+  });
+
+  it('omits an unfinished tool draft rather than treating its parameters as prose', () => {
+    expect(buildReplyPreview('正文已保存。\n```polaris-tools\n{"actions":[{"kind":"synthetic"}'))
+      .toBe('正文已保存。');
+  });
 });
 
 describe('buildProactiveReplyNotification', () => {

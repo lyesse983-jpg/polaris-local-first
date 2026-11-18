@@ -34,6 +34,7 @@ export type AppReplyNotification = {
   collaboratorName: string;
   conversationId: string;
   preview: string;
+  nativeDeliveryStatus?: 'synced' | 'denied' | 'failed' | 'unavailable' | 'exact-denied';
   createdAt: number;
 };
 

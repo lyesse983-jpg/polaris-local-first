@@ -50,6 +50,9 @@ export function useNativeTriggerNotifications({
   const exactAlarmPromptedRef = useRef(false);
 
   const handleTriggerTap = (tap: NativeTriggerNotificationTap) => {
+    const current = useRuntimeStore.getState().triggerRules.find((rule) => rule.id === tap.ruleId);
+    if (!current || !current.enabled || current.action.delivery === 'silent') return;
+    if (tap.scheduledFor !== null && current.lastRunAt !== null && current.lastRunAt >= tap.scheduledFor) return;
     const now = Date.now();
     pruneHandledTapKeys(handledTapKeysRef.current, now);
     const tapKey = resolveTapKey(tap);

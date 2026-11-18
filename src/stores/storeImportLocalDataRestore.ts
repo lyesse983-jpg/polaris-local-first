@@ -6,6 +6,7 @@ import {
   buildCollectionMigrationPlan,
   buildDocumentLocalDataStateFromSources,
   buildDocumentMigrationPlan,
+  documentObjectIncompleteReason,
   buildPersonaMigrationPlan,
   buildRuntimeMigrationPlan,
   buildSpaceMigrationPlan,
@@ -190,14 +191,16 @@ export async function restoreStructuredImportToLocalDataRepository(
 
         const kv = Array.from(projected, ([key, value]) => ({ key, value }));
         const censusReport = await readLocalDataCensusReportForKv(kv);
-        const validation = buildLocalDataStoreHydrationValidationReports({
+        const validationResult = buildLocalDataStoreHydrationValidationReports({
           kv,
           censusDomains: censusReport.domains,
           domains: [unitOfWork.domain],
           validatedAt
-        }).validationReports[unitOfWork.domain];
+        });
+        const validation = validationResult.validationReports[unitOfWork.domain];
         if (!validation) {
-          throw new Error(`Projected LocalData validation is missing for ${unitOfWork.domain}.`);
+          const failure = unitOfWork.domain === 'chat' ? undefined : validationResult.failures[unitOfWork.domain];
+          throw new Error(failure ?? `Projected LocalData validation is missing for ${unitOfWork.domain}.`);
         }
         return validation;
       }
@@ -270,6 +273,15 @@ export async function restoreStructuredImportToLocalDataRepository(
       version,
       updatedAt: committedAt
     });
+    // An explicit backup restore is a new write of the imported snapshot. Preserve
+    // original object timestamps inside the value, but date its row envelope at
+    // this restore, so a newer seeded/local revision does not reject an older backup.
+    // A concurrent write newer than committedAt is still protected by the repository.
+    collectionPlan.unitOfWork.mutations = collectionPlan.unitOfWork.mutations.map((mutation) => (
+      mutation.type === 'put' && mutation.row.state === 'complete'
+        ? { ...mutation, row: { ...mutation.row, updatedAt: committedAt } }
+        : mutation
+    ));
     return await commitAndPromoteProjectedDomain(await prepareReplacement(collectionPlan.unitOfWork));
   });
 
@@ -308,14 +320,22 @@ export async function restoreStructuredImportToLocalDataRepository(
   });
 
   await restoreDomain('document', async () => {
+    const state = buildDocumentLocalDataStateFromSources({
+      kv: serializePersonaMemoryDocContentEntries(payload.personaMemoryDocContent),
+      personas: personasWithDocContent,
+      workspaceReferenceDocs: payload.collectionState.workspaceReferenceDocs,
+      updatedAt: committedAt
+    });
+    const incomplete = state.documents.filter(documentObjectIncompleteReason);
+    if (incomplete.length) {
+      const missing = incomplete.filter((doc) => doc.body.content === null).length;
+      const short = incomplete.filter((doc) => doc.body.content !== null && doc.body.content.length < doc.declaredCharCount).length;
+      // Fixed labels and counts only: no source text, titles, ids or credentials.
+      throw new Error(`DOCUMENT_BODY_INCOMPLETE missing=${missing} short=${short} memory=${incomplete.filter((doc) => doc.kind === 'persona-memory-doc').length} workspace=${incomplete.filter((doc) => doc.kind === 'workspace-reference-doc').length} orphan=${incomplete.filter((doc) => doc.kind === 'orphan-body').length}`);
+    }
     const documentPlan = buildDocumentMigrationPlan({
       id: `import-document-${committedAt}`,
-      state: buildDocumentLocalDataStateFromSources({
-        kv: serializePersonaMemoryDocContentEntries(payload.personaMemoryDocContent),
-        personas: personasWithDocContent,
-        workspaceReferenceDocs: payload.collectionState.workspaceReferenceDocs,
-        updatedAt: committedAt
-      }),
+      state,
       version,
       updatedAt: committedAt
     });

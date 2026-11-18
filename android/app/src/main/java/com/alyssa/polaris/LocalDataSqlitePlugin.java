@@ -2,6 +2,7 @@ package com.alyssa.polaris;
 
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteDoneException;
 import android.database.sqlite.SQLiteStatement;
 import android.util.Base64;
 import com.getcapacitor.JSArray;
@@ -278,7 +279,14 @@ public class LocalDataSqlitePlugin extends Plugin {
         }
     }
 
-    private JSONArray runQuery(SQLiteDatabase db, String sql, JSArray params) throws Exception {
+    JSONArray runQuery(SQLiteDatabase db, String sql, JSArray params) throws Exception {
+        // Scalar reads bypass CursorWindow, whose row limit can reject complete long conversations.
+        if (normalizeSql(READ_ENTRY_SQL).equals(sql)) {
+            return queryTextRow(db, sql, params, "value_json");
+        }
+        if (normalizeSql(READ_CHAT_CONVERSATION_METADATA_SQL).equals(sql)) {
+            return queryTextRow(db, sql, params, "metadata_json");
+        }
         JSONArray rows = new JSONArray();
         String[] selectionArgs = queryArgs(params);
         try (Cursor cursor = db.rawQuery(sql, selectionArgs)) {
@@ -293,7 +301,26 @@ public class LocalDataSqlitePlugin extends Plugin {
         return rows;
     }
 
-    private void bindParams(SQLiteStatement statement, JSArray params) throws Exception {
+    static JSONArray queryTextRow(SQLiteDatabase db, String sql, JSArray params, String column) throws Exception {
+        SQLiteStatement statement = db.compileStatement(sql);
+        try {
+            bindParams(statement, params);
+            String value;
+            try {
+                value = statement.simpleQueryForString();
+            } catch (SQLiteDoneException missingRow) {
+                // Only a proven missing row is absent. All other read failures propagate.
+                return new JSONArray();
+            }
+            JSONObject row = new JSONObject();
+            row.put(column, value == null ? JSONObject.NULL : value);
+            return new JSONArray().put(row);
+        } finally {
+            statement.close();
+        }
+    }
+
+    private static void bindParams(SQLiteStatement statement, JSArray params) throws Exception {
         for (int index = 0; index < params.length(); index += 1) {
             Object value = params.get(index);
             int bindIndex = index + 1;

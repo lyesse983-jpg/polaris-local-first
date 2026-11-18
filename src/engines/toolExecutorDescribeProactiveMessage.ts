@@ -23,7 +23,9 @@ export function describeProactiveMessageToolAction(action: ProactiveMessageToolA
       return {
         kind: action.kind,
         title: '创建主动消息规则',
-        summary: action.schedule.kind === 'daily'
+        summary: action.schedule.kind === 'once'
+          ? `${action.targetLabel || action.name || '当前协作者'} · 一次性预约 ${new Date(action.schedule.at).toISOString()}`
+          : action.schedule.kind === 'daily'
           ? `${action.targetLabel || action.name || '当前协作者'} · 每天 ${action.schedule.time}`
           : `${action.targetLabel || action.name || '当前协作者'} · 每隔 ${action.schedule.everyMinutes} 分钟`,
         targetLabel: action.targetLabel || action.name

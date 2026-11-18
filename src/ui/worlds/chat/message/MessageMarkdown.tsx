@@ -10,6 +10,7 @@ import { cleanDisplayText } from '../../../text/displayText';
 
 type MessageMarkdownProps = {
   content: string;
+  assistantBubbles?: boolean;
 };
 
 type MarkdownBlock =
@@ -390,10 +391,42 @@ function renderBlock(block: MarkdownBlock, index: number, keyPrefix = 'block'): 
   return <p key={`${keyPrefix}-paragraph-${index}`} className="message-rich-text-paragraph">{renderLines(block.lines)}</p>;
 }
 
-export function MessageMarkdown({ content }: MessageMarkdownProps) {
+export function MessageMarkdown({ content, assistantBubbles = false }: MessageMarkdownProps) {
   const displayContent = useMemo(() => cleanDisplayText(content), [content]);
   const blocks = useMemo(() => parseMarkdownBlocks(displayContent.trim()), [displayContent]);
   if (!blocks.length) return null;
+
+  if (assistantBubbles) {
+    // Presentation only: lists, code, tables, math and rich cards remain whole
+    // blocks. Headings stay with the following block instead of becoming an
+    // isolated bubble. The stored message and request context remain unchanged.
+    const groups: MarkdownBlock[][] = [];
+    let pending: MarkdownBlock[] = [];
+    blocks.forEach((block) => {
+      pending.push(block);
+      if (block.type !== 'heading') {
+        groups.push(pending);
+        pending = [];
+      }
+    });
+    if (pending.length) {
+      if (groups.length) groups[groups.length - 1].push(...pending);
+      else groups.push(pending);
+    }
+    return (
+      <div className="assistant-paragraph-bubbles">
+        {groups.map((group, groupIndex) => (
+          <div className="bubble-frame assistant assistant-paragraph-frame" key={groupIndex}>
+            <div className="bubble assistant">
+              <div className="message-rich-text message-markdown">
+                {group.map((block, index) => renderBlock(block, index, `paragraph-${groupIndex}`))}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="message-rich-text message-markdown">

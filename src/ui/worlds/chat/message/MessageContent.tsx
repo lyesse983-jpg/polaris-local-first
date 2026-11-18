@@ -28,6 +28,7 @@ type MessageContentProps = {
   hasResolvedToolEvent?: boolean;
   collapseThinkingProjection?: boolean;
   smoothStreamingText?: boolean;
+  splitAssistantBubbles?: boolean;
 };
 
 type Translate = I18nTranslator['t'];
@@ -143,9 +144,9 @@ function renderRichText(content: string) {
   return <MessageMarkdown content={content} />;
 }
 
-function renderAssistantProse(content: string) {
+function renderAssistantProse(content: string, assistantBubbles = false) {
   if (!content.trim()) return null;
-  return renderRichText(content);
+  return <MessageMarkdown content={content} assistantBubbles={assistantBubbles} />;
 }
 
 function renderToolDrafts(
@@ -288,7 +289,8 @@ export function MessageContent({
   hasProjectedCodeToolEvent = false,
   hasResolvedToolEvent = false,
   collapseThinkingProjection = false,
-  smoothStreamingText = false
+  smoothStreamingText = false,
+  splitAssistantBubbles = false
 }: MessageContentProps) {
   const { t } = useI18n();
   const [closingThinkingText, setClosingThinkingText] = useState<string | null>(null);
@@ -405,7 +407,7 @@ export function MessageContent({
 
     return (
       <>
-        {renderAssistantProse(inlineContent)}
+        {renderAssistantProse(inlineContent, splitAssistantBubbles)}
         {hasThinkingProjection && visibleThinkingText ? (
           <MessageThinkingProjection thinkingText={visibleThinkingText} />
         ) : closingThinkingText ? (
@@ -428,7 +430,7 @@ export function MessageContent({
 
   return (
     <>
-      {renderAssistantProse(proseContent)}
+      {renderAssistantProse(proseContent, splitAssistantBubbles)}
       {shouldShowThinkingProjection && visibleThinkingText ? (
         <MessageThinkingProjection thinkingText={visibleThinkingText} />
       ) : closingThinkingText ? (

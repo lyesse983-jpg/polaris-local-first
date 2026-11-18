@@ -42,6 +42,10 @@ export interface PolarisCompanionConnection {
 export type PolarisTriggerSource = 'schedule' | 'webhook' | 'shortcut' | 'mcp' | 'manual';
 export type PolarisTriggerSchedule =
   | {
+      kind: 'once';
+      at: number;
+    }
+  | {
       kind: 'daily';
       time: string;
     }
@@ -56,6 +60,8 @@ export type PolarisTriggerTarget = {
 };
 export type PolarisTriggerAction = {
   prompt: string;
+  delivery?: 'message' | 'silent';
+  autonomous?: boolean;
 };
 export interface PolarisTriggerRule {
   id: string;
@@ -71,6 +77,7 @@ export interface PolarisTriggerRule {
   lastRunAt: number | null;
   nextRunAt: number | null;
   lastError: string | null;
+  runHistory?: number[];
 }
 
 export interface PolarisCompanionAutomationRule {

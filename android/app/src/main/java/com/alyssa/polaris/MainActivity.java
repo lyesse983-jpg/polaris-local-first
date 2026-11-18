@@ -9,6 +9,8 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(SystemFilePlugin.class);
         registerPlugin(LocalDataSqlitePlugin.class);
         registerPlugin(NativeProviderHttpPlugin.class);
+        registerPlugin(PolarisTriggerAlarmPlugin.class);
+        registerPlugin(PolarisHeartbeatWorkerPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
